@@ -1,0 +1,11 @@
+---
+description: Use develop as the default git branch; keep the repo checked out on develop
+alwaysApply: true
+---
+
+# Default branch — `develop`
+
+- Treat **`develop`** as the primary working branch for this repository. Assume day-to-day work, fixes, and features target **`develop`** unless the user explicitly names another branch.
+- Before editing or running git commands that depend on the current branch, ensure the working tree is on **`develop`**. If you are on **`main`** or another branch, run `git checkout develop` (or create `develop` from **`main`** and push it) so the local repo ends on **`develop`**.
+- When suggesting merges, PRs, or release steps, default to merging **into `develop`** first. Sync to **`main`** only when the user asks for a production or release alignment.
+- At the end of a task, **do not** switch the checkout back to **`main`** unless the user requested it—leave the repository on **`develop`** so the next session matches project convention.
