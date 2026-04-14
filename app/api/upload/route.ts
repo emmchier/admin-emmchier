@@ -1,8 +1,11 @@
 import { createClient } from 'contentful-management';
 import type { AssetProps } from 'contentful-management';
+import type { PlainClientAPI } from 'contentful-management';
 import { NextResponse } from 'next/server';
 import path from 'node:path';
 import sharp from 'sharp';
+import { getContentfulEnv, getEntryLocale, getImageAssetContentTypeId } from '@/lib/contentful-env';
+import { isSpaceId } from '@/lib/spaces';
 
 export const runtime = 'nodejs';
 
@@ -11,25 +14,6 @@ const MAX_WIDTH_PX = 2400;
 const WEBP_QUALITY = 85;
 const ASSET_LOCALE = 'en-US' as const;
 const PROCESSED_MIME = 'image/webp' as const;
-
-type ContentfulEnv = {
-  spaceId: string;
-  environmentId: string;
-};
-
-function getContentfulEnv(): ContentfulEnv {
-  const accessToken = process.env.CONTENTFUL_MANAGEMENT_TOKEN;
-  const spaceId = process.env.CONTENTFUL_SPACE_ART_ID;
-  const environmentId = process.env.CONTENTFUL_ENVIRONMENT;
-
-  if (!accessToken || !spaceId || !environmentId) {
-    throw new Error(
-      'Missing Contentful configuration: CONTENTFUL_MANAGEMENT_TOKEN, CONTENTFUL_SPACE_ART_ID, and CONTENTFUL_ENVIRONMENT must be set',
-    );
-  }
-
-  return { spaceId, environmentId };
-}
 
 /** WebP filename: basename stem + `.webp` (avoids `photo.jpg.webp`). */
 function toWebpFileName(originalFileName: string): string {
@@ -84,9 +68,76 @@ async function processImageToWebp(inputBuffer: Buffer): Promise<{
   return { buffer: data, width, height };
 }
 
+function readFormText(formData: FormData, key: string): string {
+  const v = formData.get(key);
+  return typeof v === 'string' ? v.trim() : '';
+}
+
+function parsePublishMetadata(formData: FormData): { title: string; alt: string } | { error: string } {
+  const title = readFormText(formData, 'title');
+  const alt = readFormText(formData, 'alt');
+
+  if (!title || !alt) {
+    return { error: 'Missing required fields: title and alt must be non-empty' };
+  }
+
+  return { title, alt };
+}
+
+/** URL-safe slug from title or filename; Contentful slug is generated server-side (not from UI). */
+function slugify(text: string): string {
+  return text
+    .toLowerCase()
+    .trim()
+    .normalize('NFD')
+    .replace(/[\u0300-\u036f]/g, '')
+    .replace(/[^a-z0-9\s-]/g, '')
+    .replace(/\s+/g, '-')
+    .replace(/-+/g, '-');
+}
+
+async function ensureUniqueSlug(args: {
+  client: PlainClientAPI;
+  spaceId: string;
+  environmentId: string;
+  contentTypeId: string;
+  baseSlug: string;
+}): Promise<string> {
+  const { client, spaceId, environmentId, contentTypeId, baseSlug } = args;
+
+  const slug = baseSlug.trim().replace(/(^-|-$)+/g, '') || 'image';
+
+  for (let i = 0; i < 50; i += 1) {
+    const candidate = i === 0 ? slug : `${slug}-${i + 1}`;
+    const query: Record<string, string | number> = {
+      content_type: contentTypeId,
+      limit: 1,
+      'fields.slug': candidate,
+    };
+
+    const existing = await client.entry.getMany({
+      spaceId,
+      environmentId,
+      query,
+    });
+
+    if (!existing.items || existing.items.length === 0) return candidate;
+  }
+
+  // As a last resort, keep readable suffixing without timestamps.
+  return `${slug}-51`;
+}
+
 export async function POST(req: Request) {
   try {
-    const mode = new URL(req.url).searchParams.get('mode');
+    const url = new URL(req.url);
+    const mode = url.searchParams.get('mode');
+    const spaceParam = url.searchParams.get('space') ?? 'art';
+    if (!isSpaceId(spaceParam)) {
+      return NextResponse.json({ error: 'Invalid space parameter' }, { status: 400 });
+    }
+    const space = spaceParam;
+
     const formData = await req.formData();
     const file = formData.get('file');
 
@@ -139,12 +190,21 @@ export async function POST(req: Request) {
       });
     }
 
+    const meta = parsePublishMetadata(formData);
+    if ('error' in meta) {
+      return NextResponse.json({ error: meta.error }, { status: 400 });
+    }
+
+    const { title, alt } = meta;
     let assetId: string;
     let cdnUrl: string;
+    let entryId: string;
 
     try {
-      const { spaceId, environmentId } = getContentfulEnv();
+      const { spaceId, environmentId } = getContentfulEnv(space);
       const originalFileName = file.name;
+      const entryLocale = getEntryLocale();
+      const imageAssetTypeId = getImageAssetContentTypeId();
 
       const client = createClient({
         accessToken: process.env.CONTENTFUL_MANAGEMENT_TOKEN!,
@@ -160,9 +220,6 @@ export async function POST(req: Request) {
         throw new Error('Processed image ArrayBuffer is empty');
       }
 
-      console.log('Processed buffer size:', processedBuffer.length);
-      console.log('ArrayBuffer byteLength:', arrayBuffer.byteLength);
-
       const upload = await client.upload.create(
         { spaceId, environmentId },
         { file: arrayBuffer },
@@ -173,7 +230,7 @@ export async function POST(req: Request) {
         {
           fields: {
             title: {
-              [ASSET_LOCALE]: originalFileName,
+              [ASSET_LOCALE]: title,
             },
             file: {
               [ASSET_LOCALE]: {
@@ -215,11 +272,44 @@ export async function POST(req: Request) {
 
       assetId = publishedAsset.sys.id;
       cdnUrl = getPublishedFileUrl(publishedAsset);
+
+      const baseSlug = slugify(title || originalFileName);
+      const uniqueSlug = await ensureUniqueSlug({
+        client,
+        spaceId,
+        environmentId,
+        contentTypeId: imageAssetTypeId,
+        baseSlug,
+      });
+
+      const draftEntry = await client.entry.create(
+        { spaceId, environmentId, contentTypeId: imageAssetTypeId },
+        {
+          fields: {
+            title: { [entryLocale]: title },
+            alt: { [entryLocale]: alt },
+            slug: { [entryLocale]: uniqueSlug },
+            image: {
+              [entryLocale]: {
+                sys: { type: 'Link', linkType: 'Asset', id: assetId },
+              },
+            },
+          },
+        },
+      );
+
+      const publishedEntry = await client.entry.publish(
+        { spaceId, environmentId, entryId: draftEntry.sys.id },
+        draftEntry,
+      );
+
+      entryId = publishedEntry.sys.id;
     } catch (contentfulError) {
       console.error('Contentful upload failed:', contentfulError);
       if (
         contentfulError instanceof Error &&
-        contentfulError.message.startsWith('Missing Contentful')
+        (contentfulError.message.startsWith('Missing Contentful') ||
+          contentfulError.message.startsWith('Missing environment'))
       ) {
         return NextResponse.json(
           { error: contentfulError.message },
@@ -227,13 +317,14 @@ export async function POST(req: Request) {
         );
       }
       return NextResponse.json(
-        { error: 'Failed to upload or publish asset to Contentful' },
+        { error: 'Failed to upload asset or publish entry in Contentful' },
         { status: 502 },
       );
     }
 
     return NextResponse.json({
       assetId,
+      entryId,
       url: cdnUrl,
       originalSize: file.size,
       processedSize: processedBuffer.byteLength,
