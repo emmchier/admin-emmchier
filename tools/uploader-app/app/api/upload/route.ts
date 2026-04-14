@@ -60,8 +60,10 @@ function toOutputFileName(originalFileName: string, format: OutputFormat): strin
 }
 
 function bufferToArrayBuffer(buf: Buffer): ArrayBuffer {
-  // Slice to exact view (avoid sharing pooled ArrayBuffer).
-  return buf.buffer.slice(buf.byteOffset, buf.byteOffset + buf.byteLength);
+  // Force a *real* ArrayBuffer (Buffer may be backed by SharedArrayBuffer in some runtimes).
+  const out = new ArrayBuffer(buf.byteLength);
+  new Uint8Array(out).set(buf);
+  return out;
 }
 
 function toAbsoluteCdnUrl(urlOrPath: string): string {
@@ -221,7 +223,7 @@ export async function POST(req: Request) {
     );
 
     const processedAsset = await client.asset.processForAllLocales(
-      { spaceId, environmentId, assetId: draftAsset.sys.id },
+      { spaceId, environmentId },
       draftAsset,
     );
 
