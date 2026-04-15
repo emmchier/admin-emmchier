@@ -9,14 +9,14 @@ type ImageModalProps = {
 export function ImageModal({ src, alt, onClose }: ImageModalProps) {
   return (
     <div
-      className="fixed inset-0 z-50 flex items-center justify-center bg-black/70 p-4 backdrop-blur-sm"
+      className="fixed inset-0 z-50 flex cursor-pointer items-center justify-center bg-black/70 p-4 backdrop-blur-sm"
       role="dialog"
       aria-modal="true"
       aria-label="Image preview"
       onClick={onClose}
     >
       <div
-        className="relative max-h-[90vh] max-w-[min(96vw,1200px)] rounded-xl border-2 border-neutral-200 bg-white p-3"
+        className="relative max-h-[90vh] max-w-[min(96vw,1200px)] cursor-default rounded-xl border-2 border-neutral-200 bg-white p-3"
         onClick={(e) => e.stopPropagation()}
       >
         <button

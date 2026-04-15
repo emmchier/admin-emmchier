@@ -10,12 +10,11 @@ export type ContentfulEnv = {
  * Maps: art → CONTENTFUL_SPACE_ART_ID, design → CONTENTFUL_SPACE_DESIGN_ID, hub → CONTENTFUL_SPACE_HUB_ID.
  */
 export function getContentfulEnv(space: SpaceId): ContentfulEnv {
-  const accessToken = process.env.CONTENTFUL_MANAGEMENT_TOKEN;
   const environmentId = process.env.CONTENTFUL_ENVIRONMENT;
 
-  if (!accessToken || !environmentId) {
+  if (!environmentId) {
     throw new Error(
-      'Missing Contentful configuration: CONTENTFUL_MANAGEMENT_TOKEN and CONTENTFUL_ENVIRONMENT must be set',
+      'Missing Contentful configuration: CONTENTFUL_ENVIRONMENT must be set',
     );
   }
 
