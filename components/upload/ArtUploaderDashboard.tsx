@@ -1015,14 +1015,14 @@ export function ArtUploaderDashboard({ space }: ArtUploaderDashboardProps) {
 
       {confirmDelete.open ? (
         <div
-          className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 p-4"
+          className="fixed inset-0 z-50 flex cursor-pointer items-center justify-center bg-black/60 p-4"
           role="dialog"
           aria-modal="true"
           aria-label="Confirm delete"
           onClick={() => setConfirmDelete({ open: false, count: 0 })}
         >
           <div
-            className="w-full max-w-md rounded-xl border border-neutral-200 bg-white p-4"
+            className="w-full max-w-md cursor-default rounded-xl border border-neutral-200 bg-white p-4"
             onClick={(e) => e.stopPropagation()}
           >
             <p className="text-sm font-semibold text-neutral-900">Delete images</p>

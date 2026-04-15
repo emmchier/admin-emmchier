@@ -1,4 +1,3 @@
-import { createClient } from 'contentful-management';
 import type { AssetProps } from 'contentful-management';
 import type { PlainClientAPI } from 'contentful-management';
 import { NextResponse } from 'next/server';
@@ -6,6 +5,7 @@ import path from 'node:path';
 import sharp from 'sharp';
 import { getContentfulEnv, getEntryLocale, getImageAssetContentTypeId } from '@/lib/contentful-env';
 import { isSpaceId } from '@/lib/spaces';
+import { artClients } from '@/lib/contentful/clients';
 
 export const runtime = 'nodejs';
 
@@ -206,9 +206,8 @@ export async function POST(req: Request) {
       const entryLocale = getEntryLocale();
       const imageAssetTypeId = getImageAssetContentTypeId();
 
-      const client = createClient({
-        accessToken: process.env.CONTENTFUL_MANAGEMENT_TOKEN!,
-      });
+      // Reuse the server CMA singleton to avoid extra client instantiation.
+      const client = artClients.managementClient;
 
       if (processedBuffer.length === 0) {
         throw new Error('Processed image buffer is empty');
@@ -249,17 +248,13 @@ export async function POST(req: Request) {
         },
       );
 
-      await client.asset.processForAllLocales(
+      // `processForAllLocales` already polls until processed with the options below.
+      // It returns an updated asset that can be published directly (no extra `asset.get` round-trip).
+      const processedAsset = await client.asset.processForAllLocales(
         { spaceId, environmentId },
         asset,
         { processingCheckWait: 750, processingCheckRetries: 30 },
       );
-
-      const processedAsset = await client.asset.get({
-        spaceId,
-        environmentId,
-        assetId: asset.sys.id,
-      });
 
       const publishedAsset = await client.asset.publish(
         {
@@ -267,7 +262,7 @@ export async function POST(req: Request) {
           environmentId,
           assetId: asset.sys.id,
         },
-        processedAsset,
+        processedAsset as any,
       );
 
       assetId = publishedAsset.sys.id;
