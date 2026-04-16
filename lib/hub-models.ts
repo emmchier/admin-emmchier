@@ -1,34 +1,11 @@
-export type HubTab =
-  | 'cv'
-  | 'resume'
-  | 'experience'
-  | 'course'
-  | 'study'
-  | 'language'
-  | 'contact'
-  | 'socialNetwork'
-  | 'tech';
+export type HubTab = 'contacts' | 'resume';
 
 export const HUB_TAB_LABELS: Record<HubTab, string> = {
-  cv: 'CV',
-  resume: 'Resume',
-  experience: 'Experience',
-  course: 'Courses',
-  study: 'Studies',
-  language: 'Languages',
-  contact: 'Contact',
-  socialNetwork: 'Social',
-  tech: 'Tech',
+  contacts: 'Contacts',
+  resume: 'Resumé',
 };
 
 export const HUB_TABS: HubTab[] = [
-  'cv',
+  'contacts',
   'resume',
-  'experience',
-  'course',
-  'study',
-  'language',
-  'contact',
-  'socialNetwork',
-  'tech',
 ];

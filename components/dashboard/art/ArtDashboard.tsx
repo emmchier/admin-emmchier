@@ -36,6 +36,25 @@ export function ArtDashboard(props: { entryLocale: string; contentfulSpaceId: st
     setSelectedEntryId(id);
   }, []);
 
+  const prefetchedEntry = React.useMemo(() => {
+    if (mode !== 'edit' || !selectedEntryId) return undefined;
+    return useContentfulStore.getState().getProjectById(selectedEntryId);
+  }, [mode, selectedEntryId]);
+
+  const editorLabels = React.useMemo(
+    () => ({
+      createSubtitle: 'Nuevo proyecto',
+      createEmptyTitle: 'Nuevo proyecto',
+      editEmptyTitle: 'Proyecto',
+      publishToast: 'Proyecto publicado',
+      unpublishToast: 'Proyecto oculto',
+      deleteDialogTitle: 'Eliminar proyecto',
+      deleteDialogDescription: (liveTitle: string) =>
+        `¿Estás seguro que querés eliminar el proyecto '${liveTitle}'?`,
+    }),
+    [],
+  );
+
   return (
     <div className="flex min-h-0 flex-1 flex-col gap-0">
       {mode === 'list' ? (
@@ -61,26 +80,13 @@ export function ArtDashboard(props: { entryLocale: string; contentfulSpaceId: st
             actions={actions}
             mode={mode}
             entryId={selectedEntryId}
-            prefetchedEntry={
-              mode === 'edit' && selectedEntryId
-                ? useContentfulStore.getState().getProjectById(selectedEntryId)
-                : undefined
-            }
+            prefetchedEntry={prefetchedEntry}
             onBack={goList}
             onCreated={async (id) => {
               await upsertEntryFromManagementApi('project', id);
               goEdit(id);
             }}
-            labels={{
-              createSubtitle: 'Nuevo proyecto',
-              createEmptyTitle: 'Nuevo proyecto',
-              editEmptyTitle: 'Proyecto',
-              publishToast: 'Proyecto publicado',
-              unpublishToast: 'Proyecto oculto',
-              deleteDialogTitle: 'Eliminar proyecto',
-              deleteDialogDescription: (liveTitle) =>
-                `¿Estás seguro que querés eliminar el proyecto '${liveTitle}'?`,
-            }}
+            labels={editorLabels}
           />
         </div>
       )}

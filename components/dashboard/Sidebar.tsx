@@ -8,32 +8,47 @@ import { Button } from '@/components/ui/button';
 type SidebarProps = {
   active: SpaceId;
   onChange: (space: SpaceId) => void;
+  onLogoClick?: () => void;
 };
 
-export function Sidebar({ active, onChange }: SidebarProps) {
+export function Sidebar({ active, onChange, onLogoClick }: SidebarProps) {
   return (
-    <aside className="flex min-h-0 w-52 shrink-0 flex-col border-r border-neutral-200 bg-white">
+    <aside className="flex min-h-0 w-60 shrink-0 flex-col border-r border-neutral-200 bg-white">
       <div className="shrink-0 px-4 pt-4">
-        <p className="text-2xl font-black leading-tight tracking-tight text-neutral-900">emmchier.</p>
+        <button
+          type="button"
+          onClick={() => (onLogoClick ? onLogoClick() : onChange('art'))}
+          className="text-2xl font-black leading-tight tracking-tight text-neutral-900"
+          aria-label="Go to ART"
+        >
+          emmchier.
+        </button>
       </div>
 
       <div className="flex min-h-0 flex-1 flex-col overflow-auto px-4 py-4">
         <p className="text-xs font-semibold uppercase tracking-wide text-neutral-500">Spaces</p>
-        <nav className="mt-3 flex flex-col gap-1" aria-label="Spaces">
+        <nav className="mt-4 flex flex-col gap-3" aria-label="Spaces">
           {SPACES.map((id) => {
             const isActive = id === active;
             return (
               <button
                 key={id}
                 type="button"
-                onClick={() => onChange(id)}
-                className={`rounded-xl border px-4 py-2.5 text-left text-sm font-medium transition ${
+                onClick={() => {
+                  if (isActive) return;
+                  onChange(id);
+                }}
+                disabled={isActive}
+                className={[
+                  'text-left font-black uppercase leading-none transition',
+                  'text-[40px]',
                   isActive
-                    ? 'border-neutral-900 bg-neutral-900 text-white'
-                    : 'border-transparent text-neutral-700 hover:border-neutral-200 hover:bg-neutral-100'
-                }`}
+                    ? 'text-neutral-900'
+                    : 'text-transparent [-webkit-text-stroke:1px_#0a0a0a] hover:text-neutral-900 hover:[-webkit-text-stroke:0px_transparent]',
+                  isActive ? 'cursor-default' : 'cursor-pointer',
+                ].join(' ')}
               >
-                {SPACE_LABELS[id]}
+                {String(SPACE_LABELS[id] ?? id).toUpperCase()}
               </button>
             );
           })}

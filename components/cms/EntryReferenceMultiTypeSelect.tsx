@@ -7,6 +7,7 @@ import { Badge } from '@/components/ui/badge';
 import { X } from 'lucide-react';
 import type { EntryLink } from '@/components/cms/EntryReferenceMultiSelect';
 import { readLocalizedField } from '@/lib/contentful/readLocalizedField';
+import { dedupeEntryLinks } from '@/lib/utils/dedupeEntryLinks';
 
 function toLink(id: string): EntryLink {
   return { sys: { type: 'Link', linkType: 'Entry', id } };
@@ -68,6 +69,14 @@ export function EntryReferenceMultiTypeSelect(props: {
   const [loadError, setLoadError] = React.useState<string | null>(null);
   const [query, setQuery] = React.useState('');
 
+  const normalizedValue = React.useMemo(() => dedupeEntryLinks(value), [value]);
+  const safeOnChange = React.useCallback(
+    (next: EntryLink[]) => {
+      onChange(dedupeEntryLinks(next));
+    },
+    [onChange],
+  );
+
   const typeLabel = React.useCallback(
     (ctId: string) => typeLabels?.[ctId] ?? DEFAULT_TYPE_LABEL[ctId] ?? ctId,
     [typeLabels],
@@ -104,7 +113,7 @@ export function EntryReferenceMultiTypeSelect(props: {
     return m;
   }, [rows, entryLocale]);
 
-  const selectedIds = React.useMemo(() => new Set(value.map((l) => l.sys.id)), [value]);
+  const selectedIds = React.useMemo(() => new Set(normalizedValue.map((l) => l.sys.id)), [normalizedValue]);
 
   const filtered = React.useMemo(() => {
     const q = query.trim().toLowerCase();
@@ -118,32 +127,32 @@ export function EntryReferenceMultiTypeSelect(props: {
 
   const toggle = React.useCallback(
     (id: string) => {
-      const exists = value.some((l) => l.sys.id === id);
-      if (exists) onChange(value.filter((l) => l.sys.id !== id));
-      else onChange([...value, toLink(id)]);
+      const exists = normalizedValue.some((l) => l.sys.id === id);
+      if (exists) safeOnChange(normalizedValue.filter((l) => l.sys.id !== id));
+      else safeOnChange([...normalizedValue, toLink(id)]);
     },
-    [onChange, value],
+    [normalizedValue, safeOnChange],
   );
 
   const remove = React.useCallback(
     (id: string) => {
-      onChange(value.filter((l) => l.sys.id !== id));
+      safeOnChange(normalizedValue.filter((l) => l.sys.id !== id));
     },
-    [onChange, value],
+    [normalizedValue, safeOnChange],
   );
 
   return (
     <div className="grid gap-2">
       <div className="flex min-h-9 flex-wrap gap-2">
-        {value.length === 0 ? (
+        {normalizedValue.length === 0 ? (
           <span className="text-xs text-zinc-500">Ninguno seleccionado.</span>
         ) : (
-          value.map((l) => {
+          normalizedValue.map((l, idx) => {
             const meta = metaById[l.sys.id];
             const lab = meta?.label ?? l.sys.id;
             const tl = meta ? typeLabel(meta.contentTypeId) : '';
             return (
-              <Badge key={l.sys.id} variant="secondary" className="gap-1 pr-1 font-normal">
+              <Badge key={`${l.sys.id}-${idx}`} variant="secondary" className="gap-1 pr-1 font-normal">
                 {tl ? (
                   <span className="rounded bg-zinc-300/80 px-1 text-[10px] font-medium text-zinc-800">{tl}</span>
                 ) : null}

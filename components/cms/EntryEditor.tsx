@@ -17,12 +17,15 @@ import {
   AlertDialogHeader,
   AlertDialogTitle,
 } from '@/components/ui/alert-dialog';
-import { ArrowLeft, Loader2, MoreVertical, RefreshCw } from 'lucide-react';
-import { toast } from 'sonner';
+import { ArrowLeft, Eye, EyeOff, Loader2, MoreVertical } from 'lucide-react';
+import { toast } from '@/lib/ui/snackbar';
 import { useProjectEditorStore } from '@/lib/stores/projectEditorStore';
 import { readLocalizedField } from '@/lib/contentful/readLocalizedField';
 import { isEntryPublished } from '@/lib/contentful/isEntryPublished';
 import { useContentfulStore } from '@/lib/store/contentfulStore';
+
+const contentTypeCache = new Map<string, any>();
+const contentTypeInflight = new Map<string, Promise<any>>();
 
 export type EntryEditorMode = 'create' | 'edit';
 
@@ -127,14 +130,55 @@ export function EntryEditor(props: EntryEditorProps) {
 
   const labels = React.useMemo(() => ({ ...defaultLabelsEs, ...labelsProp }), [labelsProp]);
 
+  const syncStoreAfterLoad = React.useCallback(
+    (loaded: any) => {
+      if (!loaded || typeof loaded !== 'object') return;
+      const store = useContentfulStore.getState();
+      switch (contentTypeId) {
+        case 'project':
+          store.updateProject(loaded as any);
+          break;
+        case 'category':
+          store.upsertCategory(loaded as any);
+          break;
+        case 'navigationGroup':
+          store.upsertNavigationGroup(loaded as any);
+          break;
+        case 'tech':
+          store.upsertTech(loaded as any);
+          break;
+        default:
+          break;
+      }
+    },
+    [contentTypeId],
+  );
+
   const fetchContentTypeById = React.useCallback(async (id: string) => {
-    const res = await fetch(`${managementApiRoot}/content-types`, { cache: 'no-store' });
-    const data = (await res.json()) as any;
-    if (!res.ok) throw new Error(data?.error || 'Failed to load content types');
-    const items = data?.items as any[];
-    const ct = items?.find((c) => c?.sys?.id === id);
-    if (!ct) throw new Error(`Missing content type: ${id}`);
-    return ct;
+    const cacheKey = `${managementApiRoot}::${id}`;
+    const cached = contentTypeCache.get(cacheKey);
+    if (cached) return cached;
+
+    const pending = contentTypeInflight.get(cacheKey);
+    if (pending) return pending;
+
+    const run = (async () => {
+      const res = await fetch(`${managementApiRoot}/content-types`, { cache: 'no-store' });
+      const data = (await res.json()) as any;
+      if (!res.ok) throw new Error(data?.error || 'Failed to load content types');
+      const items = data?.items as any[];
+      const ct = items?.find((c) => c?.sys?.id === id);
+      if (!ct) throw new Error(`Missing content type: ${id}`);
+      contentTypeCache.set(cacheKey, ct);
+      return ct;
+    })();
+
+    contentTypeInflight.set(cacheKey, run);
+    try {
+      return await run;
+    } finally {
+      contentTypeInflight.delete(cacheKey);
+    }
   }, [managementApiRoot]);
 
   const fetchEntry = React.useCallback(
@@ -156,7 +200,7 @@ export function EntryEditor(props: EntryEditorProps) {
   const [saving, setSaving] = React.useState(false);
   const [publishing, setPublishing] = React.useState(false);
   const [deleting, setDeleting] = React.useState(false);
-  const [refreshing, setRefreshing] = React.useState(false);
+  // Refresh is global (header). Keep local editor state only.
   const [confirmDeleteOpen, setConfirmDeleteOpen] = React.useState(false);
   const resetStore = useProjectEditorStore((s) => s.reset);
   const currentData = useProjectEditorStore((s) => s.currentData);
@@ -173,10 +217,10 @@ export function EntryEditor(props: EntryEditorProps) {
 
       // For projects, the edit UI needs gallery + makingOf to render images and rich text.
       if (contentTypeId === 'project') {
-        const f = c.fields as Record<string, unknown>;
-        const hasGallery = Object.prototype.hasOwnProperty.call(f, 'gallery');
-        const hasMakingOf = Object.prototype.hasOwnProperty.call(f, 'makingOf');
-        return hasGallery && hasMakingOf;
+        // Projects in the list cache might not have optional fields present as own-properties.
+        // If the entry is already in Zustand with a `fields` object, treat it as sufficient and
+        // avoid refetching on back/forward navigation.
+        return true;
       }
 
       // Other models: minimal fields are enough for the form to render.
@@ -202,10 +246,12 @@ export function EntryEditor(props: EntryEditorProps) {
         if (mode === 'edit' && entryId) {
           if (canUsePrefetchedEntry(prefetchedEntry)) {
             setEntry(prefetchedEntry);
+            resetStore({});
           } else {
             const e = await fetchEntry(entryId);
             if (cancelled) return;
             setEntry(e);
+            syncStoreAfterLoad(e);
             resetStore({});
           }
         } else {
@@ -222,7 +268,17 @@ export function EntryEditor(props: EntryEditorProps) {
     return () => {
       cancelled = true;
     };
-  }, [canUsePrefetchedEntry, contentTypeId, entryId, fetchContentTypeById, fetchEntry, mode, prefetchedEntry, resetStore]);
+  }, [
+    canUsePrefetchedEntry,
+    contentTypeId,
+    entryId,
+    fetchContentTypeById,
+    fetchEntry,
+    mode,
+    prefetchedEntry,
+    resetStore,
+    syncStoreAfterLoad,
+  ]);
 
   const onDelete = React.useCallback(async () => {
     if (!entryId) return;
@@ -255,21 +311,7 @@ export function EntryEditor(props: EntryEditorProps) {
     }
   }, [actions, entryId, fetchEntry, labels.publishToast, labels.unpublishToast, published]);
 
-  const refreshFromContentful = React.useCallback(async () => {
-    if (!entryId) return;
-    if (refreshing) return;
-    setRefreshing(true);
-    try {
-      const next = await fetchEntry(entryId);
-      setEntry(next);
-      resetStore({});
-      toast.success(labels.refreshToast);
-    } catch (e) {
-      toast.error(e instanceof Error ? e.message : labels.refreshError);
-    } finally {
-      setRefreshing(false);
-    }
-  }, [entryId, fetchEntry, labels.refreshError, labels.refreshToast, refreshing, resetStore]);
+  // Refresh is global (header). Editor never refetches on demand.
 
   const applyOptimisticSaveToEntry = React.useCallback(
     (existingEntry: any, nextFields: Record<string, any>) => {
@@ -350,7 +392,6 @@ export function EntryEditor(props: EntryEditorProps) {
       toast.success(labels.savedToast);
     } catch (e) {
       toast.error(e instanceof Error ? e.message : labels.saveError);
-      throw e;
     } finally {
       setSaving(false);
     }
@@ -404,15 +445,16 @@ export function EntryEditor(props: EntryEditorProps) {
   headerLiveTitleRef.current = headerLiveTitle;
 
   return (
-    <div className="flex h-full min-h-0 flex-1 flex-col bg-white">
-      <div className="shrink-0 space-y-3 px-0 pb-0 pt-0">
+    <div className="grid h-full min-h-0 flex-1 grid-cols-12 bg-white">
+      <div className="col-span-12 flex min-h-0 flex-1 flex-col lg:col-start-3 lg:col-span-8">
+      <div className="shrink-0 space-y-3 px-4 pb-0 pt-0 my-4">
         <div className="flex flex-wrap items-center justify-between gap-3">
           <div className="flex min-w-0 items-center gap-2">
-            <Button type="button" variant="ghost" size="icon" onClick={onBack} aria-label="Volver">
+            <Button type="button" variant="outline" size="icon" onClick={onBack} aria-label="Volver">
               <ArrowLeft className="h-4 w-4" />
             </Button>
             <div className="min-w-0">
-              <h2 className="truncate text-base font-semibold text-neutral-900">{headerLiveTitle}</h2>
+              <h2 className="truncate text-[20px] font-bold leading-tight text-neutral-900">{headerLiveTitle}</h2>
               {mode === 'edit' && entryId ? (
                 <div className="mt-1 flex items-center gap-2">
                   <Badge className={published ? 'bg-emerald-600 text-white hover:bg-emerald-600' : ''} variant={published ? 'default' : 'secondary'}>
@@ -426,22 +468,7 @@ export function EntryEditor(props: EntryEditorProps) {
           </div>
 
           <div className="flex items-center gap-2">
-            {mode === 'edit' ? (
-              <Button
-                type="button"
-                variant="outline"
-                size="sm"
-                onClick={() => void refreshFromContentful()}
-                disabled={!entryId || refreshing || busy || saving || publishing}
-              >
-                {refreshing ? (
-                  <Loader2 className="mr-2 h-4 w-4 animate-spin" />
-                ) : (
-                  <RefreshCw className="mr-2 h-4 w-4" />
-                )}
-                {labels.refresh}
-              </Button>
-            ) : null}
+            {mode === 'edit' ? null : null}
 
             <Button type="button" onClick={() => void save()} disabled={!isDirty || saving || busy}>
               {saving ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : null}
@@ -449,9 +476,16 @@ export function EntryEditor(props: EntryEditorProps) {
             </Button>
 
             {mode === 'edit' ? (
-              <Button type="button" variant="secondary" onClick={() => void onTogglePublish()} disabled={!entryId || publishing}>
-                {publishing ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : null}
-                {published ? labels.unpublish : labels.publish}
+              <Button
+                type="button"
+                variant="outline"
+                size="icon"
+                onClick={() => void onTogglePublish()}
+                disabled={!entryId || publishing}
+                aria-label={published ? labels.unpublish : labels.publish}
+              >
+                {publishing ? <Loader2 className="h-4 w-4 animate-spin" /> : published ? <Eye className="h-4 w-4" /> : <EyeOff className="h-4 w-4" />}
+                <span className="sr-only">{published ? labels.unpublish : labels.publish}</span>
               </Button>
             ) : null}
 
@@ -464,7 +498,7 @@ export function EntryEditor(props: EntryEditorProps) {
                   <DropdownMenuContent align="end">
                     <DropdownMenuItem
                       variant="destructive"
-                      onSelect={(e) => {
+                      onClick={(e) => {
                         e.preventDefault();
                         setConfirmDeleteOpen(true);
                       }}
@@ -504,9 +538,9 @@ export function EntryEditor(props: EntryEditorProps) {
           </div>
         </div>
       </div>
-      <div className="flex min-h-0 flex-1 flex-col px-0 pb-4 pt-0">
-        <ScrollArea className="min-h-0 flex-1 bg-white px-0">
-          <div className="space-y-4 px-0">
+      <div className="flex min-h-0 flex-1 flex-col px-4 pb-4 pt-0">
+        <ScrollArea className="min-h-0 flex-1 bg-white">
+          <div className="space-y-4 pb-[72px]">
             {error ? (
               <p className="border border-red-200 bg-red-50 px-4 py-4 text-sm text-red-700">{error}</p>
             ) : null}
@@ -529,6 +563,7 @@ export function EntryEditor(props: EntryEditorProps) {
             )}
           </div>
         </ScrollArea>
+      </div>
       </div>
     </div>
   );

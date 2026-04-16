@@ -15,13 +15,13 @@ import {
   PaginationNext,
   PaginationPrevious,
 } from '@/components/ui/pagination';
-import type { ContentfulModelName, ContentfulStore } from '@/lib/store/contentfulStore';
-import { useContentfulStore } from '@/lib/store/contentfulStore';
-import { ensureContentfulModelLoaded } from '@/lib/store/ensureContentfulModelLoaded';
-import { readLocalizedField } from '@/lib/contentful/readLocalizedField';
 import { isEntryPublished } from '@/lib/contentful/isEntryPublished';
+import { readLocalizedField } from '@/lib/contentful/readLocalizedField';
+import type { HubModelName } from '@/lib/store/hubStore';
+import { useHubStore } from '@/lib/store/hubStore';
+import { ensureHubModelLoaded } from '@/lib/store/ensureHubModelLoaded';
 
-const PAGE_SIZE = 10;
+const PAGE_SIZE = 8;
 
 function readField(entry: any, fieldId: string, locale: string): string {
   if (fieldId === '__entryId__') return entry?.sys?.id ? String(entry.sys.id) : '';
@@ -44,98 +44,52 @@ function compactPageList(current: number, totalPages: number): (number | 'ellips
   return out;
 }
 
-function recordSelector(model: ContentfulModelName) {
-  return (s: ContentfulStore) => {
-    switch (model) {
-      case 'project':
-        return s.projects;
-      case 'category':
-        return s.categories;
-      case 'navigationGroup':
-        return s.navigationGroups;
-      case 'tech':
-        return s.techs;
-    }
-  };
-}
-
-const EMPTY_RECORD: Record<string, never> = {};
-
 function sortByUpdatedDesc<T extends { sys?: { updatedAt?: string } }>(a: T, b: T): number {
   const ta = Date.parse(a.sys?.updatedAt ?? '') || 0;
   const tb = Date.parse(b.sys?.updatedAt ?? '') || 0;
   return tb - ta;
 }
 
-export type EntryListProps = {
-  contentTypeId: string;
-  entryLocale: string;
-  /** Management API base path (ART default). */
-  managementApiRoot?: string;
-  /** When set, list is driven by Zustand + Delivery cache (no list GET on mount/navigation). */
-  cacheModel?: ContentfulModelName;
-  /** Plural heading, e.g. "Projects", "Categories" */
-  entityPluralLabel: string;
-  searchPlaceholder?: string;
-  /** Field id used for the Title column (e.g. `title`, `name`) */
-  primaryFieldId?: string;
-  newLabel: string;
-  refreshLabel?: string;
-  refreshingLabel?: string;
-  statusPublishedLabel?: string;
-  statusDraftLabel?: string;
-  onNew: () => void;
-  onEdit: (entryId: string) => void;
-};
-
-async function fetchEntriesRemote(
-  managementApiRoot: string,
-  contentTypeId: string,
-  limit: number,
-  skip: number,
-  query?: string,
-): Promise<{ items: any[]; total: number }> {
-  const q = new URLSearchParams({
-    contentType: contentTypeId,
-    limit: String(limit),
-    skip: String(skip),
-  });
-  if (query?.trim()) q.set('q', query.trim());
-  const res = await fetch(`${managementApiRoot}/entries?${q.toString()}`, { method: 'GET', cache: 'no-store' });
-  const data = (await res.json()) as any;
-  if (!res.ok) throw new Error(data?.error || 'Failed to load entries');
-  const total = typeof data.total === 'number' ? data.total : (data.items?.length ?? 0);
-  return { items: data.items || [], total };
+function selectRecord(model: HubModelName) {
+  return (s: any) => {
+    switch (model) {
+      case 'contact':
+        return s.contacts;
+      case 'socialNetwork':
+        return s.socialNetworks;
+      case 'experience':
+        return s.experiences;
+      case 'course':
+        return s.courses;
+      case 'study':
+        return s.studies;
+      case 'language':
+        return s.languages;
+      case 'tech':
+        return s.techs;
+    }
+  };
 }
 
-export function EntryList(props: EntryListProps) {
-  const {
-    contentTypeId,
-    entryLocale,
-    managementApiRoot = '/api/contentful',
-    cacheModel,
-    entityPluralLabel,
-    searchPlaceholder = 'Buscar…',
-    primaryFieldId = 'title',
-    newLabel,
-    refreshLabel = 'Refresh',
-    refreshingLabel = 'Refreshing…',
-    statusPublishedLabel = 'Published',
-    statusDraftLabel = 'Draft',
-    onNew,
-    onEdit,
-  } = props;
+export function HubCachedEntryList(props: {
+  model: HubModelName;
+  contentTypeId: string;
+  entryLocale: string;
+  entityPluralLabel: string;
+  primaryFieldId: string;
+  newLabel: string;
+  onNew: () => void;
+  onEdit: (id: string) => void;
+}) {
+  const { model, entryLocale, entityPluralLabel, primaryFieldId, newLabel, onNew, onEdit } = props;
+  const record = useHubStore(selectRecord(model));
+  const loaded = useHubStore((s) => s.loaded[model]);
 
-  const record = useContentfulStore(cacheModel ? recordSelector(cacheModel) : () => EMPTY_RECORD);
-  const modelLoaded = useContentfulStore((s) => (cacheModel ? s.loadedModels[cacheModel] : true));
-
-  const [remoteItems, setRemoteItems] = React.useState<any[]>([]);
-  const [remoteTotal, setRemoteTotal] = React.useState(0);
-  const [error, setError] = React.useState<string | null>(null);
   const [busy, setBusy] = React.useState(false);
-  const [page, setPage] = React.useState(1);
+  const [error, setError] = React.useState<string | null>(null);
   const [searchInput, setSearchInput] = React.useState('');
   const [debouncedSearch, setDebouncedSearch] = React.useState('');
+  const [page, setPage] = React.useState(1);
 
   React.useEffect(() => {
     const t = window.setTimeout(() => {
@@ -144,68 +98,55 @@ export function EntryList(props: EntryListProps) {
         if (prev !== next) setPage(1);
         return next;
       });
-    }, 350);
+    }, 250);
     return () => window.clearTimeout(t);
   }, [searchInput]);
 
-  const loadRemote = React.useCallback(async () => {
-    if (cacheModel) return;
-    setBusy(true);
-    setError(null);
-    try {
-      const skip = (page - 1) * PAGE_SIZE;
-      const data = await fetchEntriesRemote(managementApiRoot, contentTypeId, PAGE_SIZE, skip, debouncedSearch);
-      setRemoteItems(data.items || []);
-      setRemoteTotal(data.total);
-    } catch (e) {
-      setError(e instanceof Error ? e.message : 'Failed to load entries');
-    } finally {
-      setBusy(false);
-    }
-  }, [cacheModel, contentTypeId, managementApiRoot, page, debouncedSearch]);
+  const load = React.useCallback(
+    async (force?: boolean) => {
+      setBusy(true);
+      setError(null);
+      try {
+        await ensureHubModelLoaded(model, { force });
+      } catch (e) {
+        setError(e instanceof Error ? e.message : 'Failed to load');
+      } finally {
+        setBusy(false);
+      }
+    },
+    [model],
+  );
 
   React.useEffect(() => {
-    if (cacheModel) return;
-    void loadRemote();
-  }, [cacheModel, loadRemote]);
+    if (loaded) return;
+    void load(false);
+  }, [load, loaded]);
 
-  const cacheAllSorted = React.useMemo(() => {
-    if (!cacheModel) return [];
+  const allSorted = React.useMemo(() => {
     const arr = Object.values(record) as any[];
     arr.sort(sortByUpdatedDesc);
     return arr;
-  }, [cacheModel, record]);
+  }, [record]);
 
-  const cacheFiltered = React.useMemo(() => {
-    if (!cacheModel) return [];
+  const filtered = React.useMemo(() => {
     const q = debouncedSearch.toLowerCase();
-    if (!q) return cacheAllSorted;
-    return cacheAllSorted.filter((e) => {
-      const primary = readField(e, primaryFieldId, entryLocale).toLowerCase();
-      return primary.includes(q);
-    });
-  }, [cacheModel, cacheAllSorted, debouncedSearch, entryLocale, primaryFieldId]);
+    if (!q) return allSorted;
+    return allSorted.filter((e) => readField(e, primaryFieldId, entryLocale).toLowerCase().includes(q));
+  }, [allSorted, debouncedSearch, entryLocale, primaryFieldId]);
 
-  const items = React.useMemo(() => {
-    if (!cacheModel) return remoteItems;
-    const skip = (page - 1) * PAGE_SIZE;
-    return cacheFiltered.slice(skip, skip + PAGE_SIZE);
-  }, [cacheModel, cacheFiltered, page, remoteItems]);
-
-  const total = cacheModel ? cacheFiltered.length : remoteTotal;
-
-  // Refresh is global (header). Lists are cache-first + on-demand only.
-
+  const total = filtered.length;
   const totalPages = Math.max(1, Math.ceil(total / PAGE_SIZE));
+  const pageItems = React.useMemo(() => compactPageList(page, totalPages), [page, totalPages]);
+  const showPagination = total > PAGE_SIZE;
 
   React.useEffect(() => {
     if (page > totalPages) setPage(totalPages);
   }, [page, totalPages]);
 
-  const pageItems = compactPageList(page, totalPages);
-  const showPagination = total > PAGE_SIZE;
-
-  const cacheWaiting = Boolean(cacheModel && !modelLoaded);
+  const items = React.useMemo(() => {
+    const skip = (page - 1) * PAGE_SIZE;
+    return filtered.slice(skip, skip + PAGE_SIZE);
+  }, [filtered, page]);
 
   return (
     <div className="flex min-h-0 flex-1 flex-col bg-white">
@@ -229,7 +170,7 @@ export function EntryList(props: EntryListProps) {
                 type="search"
                 value={searchInput}
                 onChange={(e) => setSearchInput(e.target.value)}
-                placeholder={searchPlaceholder}
+                placeholder="Buscar…"
                 className="mb-4 max-w-sm min-w-48"
                 aria-label="Filtrar entradas"
               />
@@ -287,9 +228,7 @@ export function EntryList(props: EntryListProps) {
           </div>
 
           <div className="mt-0 min-h-0 flex-1 overflow-auto px-4 pb-[72px] pt-0">
-            {error ? (
-              <p className="mb-4 border border-red-200 bg-red-50 px-4 py-4 text-sm text-red-700">{error}</p>
-            ) : null}
+            {error ? <p className="mb-4 border border-red-200 bg-red-50 px-4 py-4 text-sm text-red-700">{error}</p> : null}
 
             <div className="overflow-hidden rounded-lg border border-neutral-200 bg-white">
               <Table className="w-full border-collapse text-left [&_td]:px-4 [&_td]:py-4 [&_td]:text-left [&_th]:px-4 [&_th]:py-4 [&_th]:text-left">
@@ -304,14 +243,14 @@ export function EntryList(props: EntryListProps) {
                   </TableRow>
                 </TableHeader>
                 <TableBody>
-                  {cacheWaiting ? (
+                  {!loaded ? (
                     <TableRow>
                       <TableCell colSpan={4} className="text-sm text-neutral-500">
                         Loading…
                       </TableCell>
                     </TableRow>
                   ) : null}
-                  {!cacheWaiting &&
+                  {loaded &&
                     items.map((e) => {
                       const primary = readField(e, primaryFieldId, entryLocale);
                       return (
@@ -331,24 +270,14 @@ export function EntryList(props: EntryListProps) {
                           <TableCell className="text-left font-medium">{primary}</TableCell>
                           <TableCell className="text-left">
                             {isEntryPublished(e.sys) ? (
-                              <Badge
-                                variant="default"
-                                className="border-transparent bg-emerald-600 text-white hover:bg-emerald-600 dark:bg-emerald-600 dark:text-white dark:hover:bg-emerald-600"
-                              >
-                                {statusPublishedLabel}
+                              <Badge className="border-transparent bg-emerald-600 text-white hover:bg-emerald-600" variant="default">
+                                Published
                               </Badge>
                             ) : (
-                              <Badge
-                                variant="secondary"
-                                className="border-amber-200 bg-amber-100 text-amber-950 hover:bg-amber-100 dark:border-amber-800 dark:bg-amber-950/60 dark:text-amber-50 dark:hover:bg-amber-950/60"
-                              >
-                                {statusDraftLabel}
-                              </Badge>
+                              <Badge variant="secondary">Draft</Badge>
                             )}
                           </TableCell>
-                          <TableCell className="text-left text-sm text-neutral-600">
-                            {new Date(e.sys.updatedAt).toLocaleString()}
-                          </TableCell>
+                          <TableCell className="text-left text-sm text-neutral-600">{new Date(e.sys.updatedAt).toLocaleString()}</TableCell>
                           <TableCell className="w-12 min-w-12 px-4 text-left text-neutral-400">
                             <ChevronRight className="h-4 w-4 shrink-0" aria-hidden />
                           </TableCell>
@@ -364,3 +293,4 @@ export function EntryList(props: EntryListProps) {
     </div>
   );
 }
+

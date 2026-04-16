@@ -1,9 +1,10 @@
 'use client';
 
 import * as React from 'react';
-import { EntryEditor, type EntryEditorLabels } from '@/components/cms/EntryEditor';
+import type { EntryEditorLabels } from '@/components/cms/EntryEditor';
 import { EntryList } from '@/components/cms/EntryList';
-import type { ArtActions, ArtMode } from '@/components/dashboard/art/ArtDashboard';
+import type { ArtActions } from '@/components/dashboard/art/ArtDashboard';
+import { HubEntrySideSheet } from '@/components/dashboard/hub/HubEntrySideSheet';
 
 const HUB_MANAGEMENT_API = '/api/contentful/hub';
 
@@ -22,58 +23,68 @@ export type HubEntityDashboardProps = {
 export function HubEntityDashboard(props: HubEntityDashboardProps) {
   const { entryLocale, contentfulSpaceId, actions, contentTypeId, primaryFieldId, displayTitleFieldId, entityPluralLabel, newLabel, editorLabels } =
     props;
-  const [mode, setMode] = React.useState<ArtMode>('list');
-  const [selectedEntryId, setSelectedEntryId] = React.useState<string | null>(null);
+  const [listVersion, setListVersion] = React.useState(0);
+  const [sheetOpen, setSheetOpen] = React.useState(false);
+  const [sheetMode, setSheetMode] = React.useState<'create' | 'edit'>('create');
+  const [sheetEntryId, setSheetEntryId] = React.useState<string | null>(null);
 
-  const goList = React.useCallback(() => {
-    setMode('list');
-    setSelectedEntryId(null);
+  const openCreate = React.useCallback(() => {
+    setSheetMode('create');
+    setSheetEntryId(null);
+    setSheetOpen(true);
   }, []);
 
-  const goCreate = React.useCallback(() => {
-    setMode('create');
-    setSelectedEntryId(null);
+  const openEdit = React.useCallback((id: string) => {
+    setSheetMode('edit');
+    setSheetEntryId(id);
+    setSheetOpen(true);
   }, []);
 
-  const goEdit = React.useCallback((id: string) => {
-    setMode('edit');
-    setSelectedEntryId(id);
-  }, []);
+  const sheetTitle = React.useMemo(() => {
+    const trimmed = (newLabel || '').trim();
+    if (sheetMode === 'create') return trimmed || `New ${entityPluralLabel}`;
+    const base = trimmed.toLowerCase().startsWith('new ') ? trimmed.slice(4).trim() : entityPluralLabel;
+    return `Edit ${base || entityPluralLabel}`;
+  }, [entityPluralLabel, newLabel, sheetMode]);
 
   return (
     <div className="flex min-h-0 flex-1 flex-col gap-0">
-      {mode === 'list' ? (
-        <EntryList
-          contentTypeId={contentTypeId}
-          entryLocale={entryLocale}
-          managementApiRoot={HUB_MANAGEMENT_API}
-          entityPluralLabel={entityPluralLabel}
-          primaryFieldId={primaryFieldId}
-          newLabel={newLabel}
-          refreshLabel="Refresh"
-          refreshingLabel="Refreshing…"
-          onNew={goCreate}
-          onEdit={goEdit}
-        />
-      ) : (
-        <div className="flex min-h-0 flex-1 flex-col">
-          <EntryEditor
-            contentTypeId={contentTypeId}
-            entryLocale={entryLocale}
-            contentfulSpaceId={contentfulSpaceId}
-            managementApiRoot={HUB_MANAGEMENT_API}
-            actions={actions}
-            mode={mode}
-            entryId={selectedEntryId}
-            displayTitleFieldId={displayTitleFieldId}
-            onBack={goList}
-            onCreated={(id) => {
-              goEdit(id);
-            }}
-            labels={editorLabels}
-          />
-        </div>
-      )}
+      <EntryList
+        key={`${contentTypeId}-${listVersion}`}
+        contentTypeId={contentTypeId}
+        entryLocale={entryLocale}
+        managementApiRoot={HUB_MANAGEMENT_API}
+        entityPluralLabel={entityPluralLabel}
+        primaryFieldId={primaryFieldId}
+        newLabel={newLabel}
+        refreshLabel="Refresh"
+        refreshingLabel="Refreshing…"
+        onNew={openCreate}
+        onEdit={openEdit}
+      />
+
+      <HubEntrySideSheet
+        open={sheetOpen}
+        onOpenChange={(open) => {
+          setSheetOpen(open);
+          if (!open) setListVersion((v) => v + 1);
+        }}
+        title={sheetTitle}
+        entryLocale={entryLocale}
+        contentfulSpaceId={contentfulSpaceId}
+        actions={actions}
+        contentTypeId={contentTypeId}
+        displayTitleFieldId={displayTitleFieldId}
+        mode={sheetMode}
+        entryId={sheetEntryId}
+        labels={editorLabels}
+        onMutated={() => setListVersion((v) => v + 1)}
+        onCreated={(id) => {
+          setSheetMode('edit');
+          setSheetEntryId(id);
+          setListVersion((v) => v + 1);
+        }}
+      />
     </div>
   );
 }

@@ -27,6 +27,25 @@ export function TechDashboard(props: { entryLocale: string; contentfulSpaceId: s
     setSelectedEntryId(id);
   }, []);
 
+  const prefetchedEntry = React.useMemo(() => {
+    if (mode !== 'edit' || !selectedEntryId) return undefined;
+    return useContentfulStore.getState().getTechById(selectedEntryId);
+  }, [mode, selectedEntryId]);
+
+  const editorLabels = React.useMemo(
+    () => ({
+      createSubtitle: 'Nueva tecnología',
+      createEmptyTitle: 'Nueva tecnología',
+      editEmptyTitle: 'Tech',
+      publishToast: 'Tech publicado',
+      unpublishToast: 'Tech oculto',
+      deleteDialogTitle: 'Eliminar tech',
+      deleteDialogDescription: (liveTitle: string) =>
+        `¿Estás seguro que querés eliminar el tech '${liveTitle}'?`,
+    }),
+    [],
+  );
+
   return (
     <div className="flex min-h-0 flex-1 flex-col gap-0">
       {mode === 'list' ? (
@@ -51,27 +70,14 @@ export function TechDashboard(props: { entryLocale: string; contentfulSpaceId: s
             actions={actions}
             mode={mode}
             entryId={selectedEntryId}
-            prefetchedEntry={
-              mode === 'edit' && selectedEntryId
-                ? useContentfulStore.getState().getTechById(selectedEntryId)
-                : undefined
-            }
+            prefetchedEntry={prefetchedEntry}
             onBack={goList}
             onCreated={async (id) => {
               await upsertEntryFromManagementApi('tech', id);
               goEdit(id);
             }}
             displayTitleFieldId="name"
-            labels={{
-              createSubtitle: 'Nueva tecnología',
-              createEmptyTitle: 'Nueva tecnología',
-              editEmptyTitle: 'Tech',
-              publishToast: 'Tech publicado',
-              unpublishToast: 'Tech oculto',
-              deleteDialogTitle: 'Eliminar tech',
-              deleteDialogDescription: (liveTitle) =>
-                `¿Estás seguro que querés eliminar el tech '${liveTitle}'?`,
-            }}
+            labels={editorLabels}
           />
         </div>
       )}
