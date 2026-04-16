@@ -27,6 +27,25 @@ export function NavigationGroupDashboard(props: { entryLocale: string; contentfu
     setSelectedEntryId(id);
   }, []);
 
+  const prefetchedEntry = React.useMemo(() => {
+    if (mode !== 'edit' || !selectedEntryId) return undefined;
+    return useContentfulStore.getState().getNavigationGroupById(selectedEntryId);
+  }, [mode, selectedEntryId]);
+
+  const editorLabels = React.useMemo(
+    () => ({
+      createSubtitle: 'Nuevo grupo de navegación',
+      createEmptyTitle: 'Nuevo grupo',
+      editEmptyTitle: 'Grupo',
+      publishToast: 'Grupo publicado',
+      unpublishToast: 'Grupo oculto',
+      deleteDialogTitle: 'Eliminar grupo',
+      deleteDialogDescription: (liveTitle: string) =>
+        `¿Estás seguro que querés eliminar el grupo de navegación '${liveTitle}'?`,
+    }),
+    [],
+  );
+
   return (
     <div className="flex min-h-0 flex-1 flex-col gap-0">
       {mode === 'list' ? (
@@ -51,26 +70,13 @@ export function NavigationGroupDashboard(props: { entryLocale: string; contentfu
             actions={actions}
             mode={mode}
             entryId={selectedEntryId}
-            prefetchedEntry={
-              mode === 'edit' && selectedEntryId
-                ? useContentfulStore.getState().getNavigationGroupById(selectedEntryId)
-                : undefined
-            }
+            prefetchedEntry={prefetchedEntry}
             onBack={goList}
             onCreated={async (id) => {
               await upsertEntryFromManagementApi('navigationGroup', id);
               goEdit(id);
             }}
-            labels={{
-              createSubtitle: 'Nuevo grupo de navegación',
-              createEmptyTitle: 'Nuevo grupo',
-              editEmptyTitle: 'Grupo',
-              publishToast: 'Grupo publicado',
-              unpublishToast: 'Grupo oculto',
-              deleteDialogTitle: 'Eliminar grupo',
-              deleteDialogDescription: (liveTitle) =>
-                `¿Estás seguro que querés eliminar el grupo de navegación '${liveTitle}'?`,
-            }}
+            labels={editorLabels}
           />
         </div>
       )}

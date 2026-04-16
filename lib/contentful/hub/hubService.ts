@@ -25,6 +25,16 @@ export type {
   HubCVSocialNetwork,
 } from '@/lib/contentful/hub/hubCvTypes';
 
+export { getHubResume } from '@/lib/contentful/hub/getHubResume';
+export type {
+  HubResumePayload,
+  HubResumeExperience,
+  HubResumeCourse,
+  HubResumeStudy,
+  HubResumeLanguage,
+  HubResumeTech,
+} from '@/lib/contentful/hub/getHubResume';
+
 export { hubCreateEntry, hubUpdateEntry, hubDeleteEntry, hubPublishEntry, hubUnpublishEntry } from '@/lib/contentful/hub/management';
 
 export { HUB_DELIVERY_CONTENT_TYPES, HUB_DELIVERY_CONTENT_TYPE_SET } from '@/lib/contentful/hub/constants';

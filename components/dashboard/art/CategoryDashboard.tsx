@@ -27,6 +27,25 @@ export function CategoryDashboard(props: { entryLocale: string; contentfulSpaceI
     setSelectedEntryId(id);
   }, []);
 
+  const prefetchedEntry = React.useMemo(() => {
+    if (mode !== 'edit' || !selectedEntryId) return undefined;
+    return useContentfulStore.getState().getCategoryById(selectedEntryId);
+  }, [mode, selectedEntryId]);
+
+  const editorLabels = React.useMemo(
+    () => ({
+      createSubtitle: 'Nueva categoría',
+      createEmptyTitle: 'Nueva categoría',
+      editEmptyTitle: 'Categoría',
+      publishToast: 'Categoría publicada',
+      unpublishToast: 'Categoría oculta',
+      deleteDialogTitle: 'Eliminar categoría',
+      deleteDialogDescription: (liveTitle: string) =>
+        `¿Estás seguro que querés eliminar la categoría '${liveTitle}'?`,
+    }),
+    [],
+  );
+
   return (
     <div className="flex min-h-0 flex-1 flex-col gap-0">
       {mode === 'list' ? (
@@ -51,26 +70,13 @@ export function CategoryDashboard(props: { entryLocale: string; contentfulSpaceI
             actions={actions}
             mode={mode}
             entryId={selectedEntryId}
-            prefetchedEntry={
-              mode === 'edit' && selectedEntryId
-                ? useContentfulStore.getState().getCategoryById(selectedEntryId)
-                : undefined
-            }
+            prefetchedEntry={prefetchedEntry}
             onBack={goList}
             onCreated={async (id) => {
               await upsertEntryFromManagementApi('category', id);
               goEdit(id);
             }}
-            labels={{
-              createSubtitle: 'Nueva categoría',
-              createEmptyTitle: 'Nueva categoría',
-              editEmptyTitle: 'Categoría',
-              publishToast: 'Categoría publicada',
-              unpublishToast: 'Categoría oculta',
-              deleteDialogTitle: 'Eliminar categoría',
-              deleteDialogDescription: (liveTitle) =>
-                `¿Estás seguro que querés eliminar la categoría '${liveTitle}'?`,
-            }}
+            labels={editorLabels}
           />
         </div>
       )}

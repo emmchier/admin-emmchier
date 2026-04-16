@@ -13,6 +13,7 @@ import {
 import { ChevronDown, X } from 'lucide-react';
 import type { EntryLink } from '@/components/cms/EntryReferenceMultiSelect';
 import { readLocalizedField } from '@/lib/contentful/readLocalizedField';
+import { dedupeEntryLinks } from '@/lib/utils/dedupeEntryLinks';
 
 function toLink(id: string): EntryLink {
   return { sys: { type: 'Link', linkType: 'Entry', id } };
@@ -46,6 +47,15 @@ export function ProjectTechsPicker(props: {
   const [loadError, setLoadError] = React.useState<string | null>(null);
   const [query, setQuery] = React.useState('');
 
+  const normalizedValue = React.useMemo(() => dedupeEntryLinks(value), [value]);
+
+  const safeOnChange = React.useCallback(
+    (next: EntryLink[]) => {
+      onChange(dedupeEntryLinks(next));
+    },
+    [onChange],
+  );
+
   React.useEffect(() => {
     let cancelled = false;
     (async () => {
@@ -64,7 +74,7 @@ export function ProjectTechsPicker(props: {
     };
   }, [managementApiRoot]);
 
-  const selectedIds = React.useMemo(() => new Set(value.map((l) => l.sys.id)), [value]);
+  const selectedIds = React.useMemo(() => new Set(normalizedValue.map((l) => l.sys.id)), [normalizedValue]);
 
   const labelById = React.useMemo(() => {
     const m: Record<string, string> = {};
@@ -85,28 +95,28 @@ export function ProjectTechsPicker(props: {
 
   const toggle = React.useCallback(
     (id: string) => {
-      const exists = value.some((l) => l.sys.id === id);
-      if (exists) onChange(value.filter((l) => l.sys.id !== id));
-      else onChange([...value, toLink(id)]);
+      const exists = normalizedValue.some((l) => l.sys.id === id);
+      if (exists) safeOnChange(normalizedValue.filter((l) => l.sys.id !== id));
+      else safeOnChange([...normalizedValue, toLink(id)]);
     },
-    [onChange, value],
+    [normalizedValue, safeOnChange],
   );
 
   const remove = React.useCallback(
     (id: string) => {
-      onChange(value.filter((l) => l.sys.id !== id));
+      safeOnChange(normalizedValue.filter((l) => l.sys.id !== id));
     },
-    [onChange, value],
+    [normalizedValue, safeOnChange],
   );
 
   return (
     <div className="grid gap-2">
       <div className="flex min-h-9 flex-wrap gap-2">
-        {value.length === 0 ? (
+        {normalizedValue.length === 0 ? (
           <span className="text-xs text-zinc-500">Sin tecnologías seleccionadas.</span>
         ) : (
-          value.map((l) => (
-            <Badge key={l.sys.id} variant="secondary" className="gap-1 pr-1 font-normal">
+          normalizedValue.map((l, idx) => (
+            <Badge key={`${l.sys.id}-${idx}`} variant="secondary" className="gap-1 pr-1 font-normal">
               <span className="max-w-[220px] truncate">{labelById[l.sys.id] || l.sys.id}</span>
               <button
                 type="button"

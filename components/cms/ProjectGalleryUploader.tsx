@@ -26,16 +26,22 @@ type UploadItem = {
 const ALLOWED = new Set(['image/png', 'image/jpeg', 'image/jpg', 'image/webp', 'image/tiff']);
 const MAX_BYTES = 15 * 1024 * 1024;
 
+type PreviewMap = Record<string, { url: string | null }>;
+const previewsCache = new Map<string, PreviewMap>();
+const previewsInflight = new Map<string, Promise<PreviewMap>>();
+
 function makeId() {
   return `${Date.now()}-${Math.random().toString(16).slice(2)}`;
 }
 
-export function ProjectGalleryUploader(props: {
+export type ProjectGalleryUploaderHandle = { open: () => void };
+
+export const ProjectGalleryUploader = React.forwardRef<ProjectGalleryUploaderHandle, {
   value: EntryLink[];
   onChange: (next: EntryLink[]) => void;
   managementApiRoot?: string;
   projectSlug?: string;
-}) {
+}>(function ProjectGalleryUploader(props, ref) {
   const { value, onChange, managementApiRoot = '/api/contentful', projectSlug } = props;
   const inputRef = React.useRef<HTMLInputElement>(null);
   const [items, setItems] = React.useState<UploadItem[]>([]);
@@ -49,6 +55,14 @@ export function ProjectGalleryUploader(props: {
 
   const slugSafe = (projectSlug || '').trim();
 
+  React.useImperativeHandle(
+    ref,
+    () => ({
+      open: () => setSheetOpen(true),
+    }),
+    [],
+  );
+
   const desiredTitle = React.useCallback(
     (imageAssetEntryId: string, index: number) => {
       // Rule: [slug]-[index]
@@ -60,22 +74,44 @@ export function ProjectGalleryUploader(props: {
 
   React.useEffect(() => {
     let cancelled = false;
-    const ids = value.map((v) => v.sys.id);
+    const ids = value.map((v) => v.sys.id).filter(Boolean);
     if (ids.length === 0) return;
+
+    // Cache-first previews: if we already resolved URLs for this set, paint instantly.
+    const cacheKey = `${managementApiRoot}::${[...ids].sort().join(',')}`;
+    const cached = previewsCache.get(cacheKey);
+    if (cached) {
+      setPreviews(cached);
+      return;
+    }
     (async () => {
       try {
-        const res = await fetch(`${managementApiRoot}/image-assets?ids=${encodeURIComponent(ids.join(','))}`, {
-          cache: 'no-store',
-        });
-        const data = (await res.json()) as any;
-        if (!res.ok) return;
-        const map: Record<string, { url: string | null }> = {};
-        for (const it of data.items || []) {
-          map[it.entryId] = { url: it.url ?? null };
-        }
+        const pending = previewsInflight.get(cacheKey);
+        const run =
+          pending ??
+          (async () => {
+            const res = await fetch(`${managementApiRoot}/image-assets?ids=${encodeURIComponent(ids.join(','))}`, {
+              cache: 'no-store',
+            });
+            const data = (await res.json()) as any;
+            if (!res.ok) return {};
+            const map: PreviewMap = {};
+            for (const it of data.items || []) {
+              const entryId = String(it.entryId ?? '');
+              if (!entryId) continue;
+              map[entryId] = { url: it.url ?? null };
+            }
+            previewsCache.set(cacheKey, map);
+            return map;
+          })();
+
+        previewsInflight.set(cacheKey, run);
+        const map = await run;
         if (!cancelled) setPreviews(map);
       } catch {
         // ignore
+      } finally {
+        previewsInflight.delete(cacheKey);
       }
     })();
     return () => {
@@ -208,17 +244,6 @@ export function ProjectGalleryUploader(props: {
 
   return (
     <div className="space-y-3">
-      <div className="flex flex-wrap items-center justify-between gap-2">
-        <div className="space-y-0.5">
-          <p className="text-sm font-medium text-zinc-900">Galería</p>
-        </div>
-        <div className="flex items-center gap-2">
-          <Button type="button" onClick={() => setSheetOpen(true)}>
-            Gestionar
-          </Button>
-        </div>
-      </div>
-
       {value.length ? (
         <div className="border border-neutral-200">
           <div className="border-b border-neutral-200 px-4 py-4">
@@ -267,7 +292,13 @@ export function ProjectGalleryUploader(props: {
                     >
                       {url ? (
                         // eslint-disable-next-line @next/next/no-img-element
-                        <img src={url} alt={title} className="h-full w-full object-cover" />
+                        <img
+                          src={url}
+                          alt={title}
+                          className="h-full w-full object-cover"
+                          loading="eager"
+                          decoding="async"
+                        />
                       ) : (
                         <div className="h-full w-full" />
                       )}
@@ -449,5 +480,5 @@ export function ProjectGalleryUploader(props: {
       </Dialog>
     </div>
   );
-}
+});
 

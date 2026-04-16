@@ -51,6 +51,7 @@
 
 body {
   font-family: var(--font-chakra-petch), system-ui, sans-serif;
+  font-size: 18px;
 }
 
 /**

@@ -9,7 +9,7 @@ import { Textarea } from '@/components/ui/textarea';
 import { Label } from '@/components/ui/label';
 import { Switch } from '@/components/ui/switch';
 import { Separator } from '@/components/ui/separator';
-import { ProjectGalleryUploader } from '@/components/cms/ProjectGalleryUploader';
+import { ProjectGalleryUploader, type ProjectGalleryUploaderHandle } from '@/components/cms/ProjectGalleryUploader';
 import { EntryReferenceMultiSelect } from '@/components/cms/EntryReferenceMultiSelect';
 import { EntryReferenceMultiTypeSelect } from '@/components/cms/EntryReferenceMultiTypeSelect';
 import { ProjectTechsPicker } from '@/components/cms/ProjectTechsPicker';
@@ -34,6 +34,14 @@ type Props = {
   hideSubmit?: boolean;
   onValuesChange?: (values: Record<string, JsonValue>) => void;
 };
+
+function slugifyTitle(title: string): string {
+  return title
+    .toLowerCase()
+    .trim()
+    .replace(/\s+/g, '-')
+    .replace(/[^\w-]+/g, '');
+}
 
 function isEditableField(field: any): boolean {
   // We intentionally do NOT allow editing the Content Model, only entry values.
@@ -101,6 +109,20 @@ export function SchemaDrivenEntryForm(props: Props) {
     return (contentType.fields || []).filter(isEditableField);
   }, [contentType.fields]);
 
+  const isProject = contentType.sys?.id === 'project';
+  const galleryRef = React.useRef<ProjectGalleryUploaderHandle | null>(null);
+
+  const sectionHeading = React.useCallback((f: any, required: boolean) => {
+    return (
+      <div className="flex items-center gap-2 text-sm font-medium text-neutral-900">
+        <span>{f.name || f.id}</span>
+        <span className="text-neutral-400">|</span>
+        <span className="italic text-neutral-500">{String(f.id)}</span>
+        {required ? <span className="text-xs font-normal text-neutral-500">(required)</span> : null}
+      </div>
+    );
+  }, []);
+
   const contentTypeHasSlugField = React.useMemo(() => fields.some((f) => f.id === 'slug'), [fields]);
 
   const [values, setValues] = React.useState<Record<string, JsonValue>>(() => {
@@ -167,17 +189,101 @@ export function SchemaDrivenEntryForm(props: Props) {
       ) : null}
 
       <div className="space-y-5">
+        {isProject ? (
+          <div className="flex flex-col gap-4 md:flex-row md:items-stretch">
+            <div className="w-full md:w-1/2">
+              <div className="grid gap-4">
+                {(() => {
+                  const f = fields.find((x) => x.id === 'title');
+                  if (!f) return null;
+                  const v = values[f.id];
+                  const required = Boolean(f.required);
+                  return (
+                    <div className="grid gap-2">
+                      <Label htmlFor={f.id}>{sectionHeading(f, required)}</Label>
+                      <Input
+                        id={f.id}
+                        value={typeof v === 'string' ? v : ''}
+                        className="w-full"
+                        onChange={(e) => {
+                          const next = e.target.value;
+                          setValue(f.id, next);
+                          setField(f.id, next);
+                          if (contentTypeHasSlugField) {
+                            const st = useProjectEditorStore.getState();
+                            if (!st.slugManuallyEdited) {
+                              const slug = slugifyTitle(next);
+                              setValue('slug', slug);
+                              setField('slug', slug);
+                            }
+                            applySlugFromTitleIfAllowed();
+                          }
+                        }}
+                      />
+                    </div>
+                  );
+                })()}
+                {(() => {
+                  const f = fields.find((x) => x.id === 'slug');
+                  if (!f) return null;
+                  const v = values[f.id];
+                  const required = Boolean(f.required);
+                  return (
+                    <div className="grid gap-2">
+                      <Label htmlFor={f.id}>{sectionHeading(f, required)}</Label>
+                      <Input
+                        id={f.id}
+                        value={typeof v === 'string' ? v : ''}
+                        className="w-full"
+                        onChange={(e) => {
+                          const next = e.target.value;
+                          setValue(f.id, next);
+                          setField(f.id, next);
+                          markSlugManual();
+                        }}
+                      />
+                    </div>
+                  );
+                })()}
+              </div>
+            </div>
+
+            <div className="flex min-h-0 w-full flex-1 flex-col">
+              {(() => {
+                const f = fields.find((x) => x.id === 'description');
+                if (!f) return null;
+                const v = values[f.id];
+                const required = Boolean(f.required);
+                return (
+                  <div className="flex min-h-0 flex-1 flex-col gap-2">
+                    <Label htmlFor={f.id}>{sectionHeading(f, required)}</Label>
+                    <Textarea
+                      id={f.id}
+                      value={typeof v === 'string' ? v : ''}
+                      onChange={(e) => {
+                        const next = e.target.value;
+                        setValue(f.id, next);
+                        setField(f.id, next);
+                      }}
+                      onBlur={(e) => setField(f.id, e.target.value)}
+                      className="min-h-0 flex-1 resize-none"
+                    />
+                  </div>
+                );
+              })()}
+            </div>
+          </div>
+        ) : null}
+
         {fields.map((f) => {
+          if (isProject && (f.id === 'title' || f.id === 'slug' || f.id === 'description')) return null;
           const t = fieldType(f);
           const v = values[f.id];
           const required = Boolean(f.required);
 
           const label = (
             <div className="flex items-center justify-between gap-3">
-              <Label htmlFor={f.id} className="text-sm">
-                {f.name || f.id} <span className="text-xs text-zinc-500">({f.id})</span>
-              </Label>
-              {required ? <span className="text-xs text-zinc-500">required</span> : null}
+              <Label htmlFor={f.id}>{sectionHeading(f, required)}</Label>
             </div>
           );
 
@@ -291,8 +397,14 @@ export function SchemaDrivenEntryForm(props: Props) {
             if (f.id === 'gallery') {
               return (
                 <div key={f.id} className="grid gap-2">
-                  {label}
+                  <div className="flex items-center justify-between gap-3">
+                    {sectionHeading({ ...f, name: 'Gallery' }, required)}
+                    <Button type="button" variant="outline" size="sm" onClick={() => galleryRef.current?.open?.()}>
+                      Add images
+                    </Button>
+                  </div>
                   <ProjectGalleryUploader
+                    ref={galleryRef}
                     value={links as any}
                     onChange={(next) => {
                       setValue(f.id, next as any);
