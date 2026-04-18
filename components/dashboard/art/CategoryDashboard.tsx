@@ -3,14 +3,23 @@
 import * as React from 'react';
 import { EntryEditor } from '@/components/cms/EntryEditor';
 import { EntryList } from '@/components/cms/EntryList';
-import type { ArtActions, ArtMode } from '@/components/dashboard/art/ArtDashboard';
+import type {
+  ArtActions,
+  ArtMode,
+} from '@/components/dashboard/art/ArtDashboard';
 import { useContentfulStore } from '@/lib/store/contentfulStore';
 import { upsertEntryFromManagementApi } from '@/lib/store/syncEntryFromManagement';
 
-export function CategoryDashboard(props: { entryLocale: string; contentfulSpaceId: string; actions: ArtActions }) {
+export function CategoryDashboard(props: {
+  entryLocale: string;
+  contentfulSpaceId: string;
+  actions: ArtActions;
+}) {
   const { entryLocale, contentfulSpaceId, actions } = props;
   const [mode, setMode] = React.useState<ArtMode>('list');
-  const [selectedEntryId, setSelectedEntryId] = React.useState<string | null>(null);
+  const [selectedEntryId, setSelectedEntryId] = React.useState<string | null>(
+    null
+  );
 
   const goList = React.useCallback(() => {
     setMode('list');
@@ -34,16 +43,16 @@ export function CategoryDashboard(props: { entryLocale: string; contentfulSpaceI
 
   const editorLabels = React.useMemo(
     () => ({
-      createSubtitle: 'Nueva categoría',
-      createEmptyTitle: 'Nueva categoría',
-      editEmptyTitle: 'Categoría',
-      publishToast: 'Categoría publicada',
-      unpublishToast: 'Categoría oculta',
-      deleteDialogTitle: 'Eliminar categoría',
+      createSubtitle: 'New Category',
+      createEmptyTitle: 'New Category',
+      editEmptyTitle: 'Category',
+      publishToast: 'Category published',
+      unpublishToast: 'Category unpublished',
+      deleteDialogTitle: 'Delete category',
       deleteDialogDescription: (liveTitle: string) =>
-        `¿Estás seguro que querés eliminar la categoría '${liveTitle}'?`,
+        `Are you sure you want to delete the category '${liveTitle}'?`,
     }),
-    [],
+    []
   );
 
   return (
@@ -55,7 +64,7 @@ export function CategoryDashboard(props: { entryLocale: string; contentfulSpaceI
           entryLocale={entryLocale}
           entityPluralLabel="Categories"
           primaryFieldId="title"
-          newLabel="New category"
+          newLabel="New Category"
           refreshLabel="Refresh"
           refreshingLabel="Refreshing…"
           onNew={goCreate}

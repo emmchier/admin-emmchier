@@ -166,7 +166,8 @@ export function HubLanguageSideSheet(props: {
           <SheetTitle className="text-base">{title}</SheetTitle>
         </SheetHeader>
 
-        <div className="min-h-0 flex-1 overflow-auto p-4">
+        <div className="min-h-0 flex-1 overflow-auto">
+          <div className="p-4">
           {error ? <p className="mb-4 border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700">{error}</p> : null}
           {loadingEntry ? (
             <p className="flex items-center gap-2 text-sm text-neutral-500">
@@ -194,6 +195,7 @@ export function HubLanguageSideSheet(props: {
               </div>
             </div>
           )}
+          </div>
         </div>
 
         <SheetFooter className="border-t border-neutral-200">

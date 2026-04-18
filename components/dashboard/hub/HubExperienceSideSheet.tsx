@@ -10,10 +10,12 @@ import { Separator } from '@/components/ui/separator';
 import { Loader2, Plus, Trash2, X } from 'lucide-react';
 import type { ArtActions } from '@/components/dashboard/art/ArtDashboard';
 import { readLocalizedField } from '@/lib/contentful/readLocalizedField';
-import { EntryReferenceMultiSelect, type EntryLink } from '@/components/cms/EntryReferenceMultiSelect';
+import type { EntryLink } from '@/components/cms/EntryReferenceMultiSelect';
+import { HubTechsPicker } from '@/components/cms/HubTechsPicker';
 import { upsertHubEntryFromManagementApi } from '@/lib/store/syncHubEntryFromManagement';
 import { useHubStore } from '@/lib/store/hubStore';
 import { ConfirmDeleteDialog } from '@/components/ui/ConfirmDeleteDialog';
+import { contentfulService } from '@/services/contentfulService';
 
 const HUB_MANAGEMENT_API = '/api/contentful/hub';
 
@@ -41,19 +43,13 @@ function asDateCell(v: string): string | null {
 }
 
 async function fetchFirstResumeId(): Promise<string | null> {
-  const q = new URLSearchParams({ contentType: 'resume', limit: '1', skip: '0' });
-  const res = await fetch(`${HUB_MANAGEMENT_API}/entries?${q.toString()}`, { cache: 'no-store' });
-  const data = (await res.json()) as any;
-  if (!res.ok) throw new Error(data?.error || 'Failed to load resume');
-  const first = data?.items?.[0];
-  return typeof first?.sys?.id === 'string' ? (first.sys.id as string) : null;
+  const items = await contentfulService.getEntriesCached({ space: 'hub', contentTypeId: 'resume' });
+  const first = items?.[0] as any;
+  return typeof first?.sys?.id === 'string' ? String(first.sys.id) : null;
 }
 
 async function fetchEntry(entryId: string): Promise<any> {
-  const res = await fetch(`${HUB_MANAGEMENT_API}/entries/${encodeURIComponent(entryId)}`, { cache: 'no-store' });
-  const data = (await res.json()) as any;
-  if (!res.ok) throw new Error(data?.error || 'Failed to load entry');
-  return data?.item;
+  return await contentfulService.getEntryById({ space: 'hub', entryId });
 }
 
 export function HubExperienceSideSheet(props: {
@@ -88,9 +84,6 @@ export function HubExperienceSideSheet(props: {
   }));
 
   const [techPickerKey, setTechPickerKey] = React.useState(0);
-  const [creatingTech, setCreatingTech] = React.useState(false);
-  const [newTechEn, setNewTechEn] = React.useState('');
-  const [newTechEs, setNewTechEs] = React.useState('');
 
   React.useEffect(() => {
     if (!open) return;
@@ -106,8 +99,6 @@ export function HubExperienceSideSheet(props: {
       endDate: '',
       techs: [],
     });
-    setNewTechEn('');
-    setNewTechEs('');
     setError(null);
   }, [mode, open]);
 
@@ -243,37 +234,6 @@ export function HubExperienceSideSheet(props: {
     }
   }, [actions, busy, entryId, onMutated, onOpenChange]);
 
-  const createTechInline = React.useCallback(async () => {
-    if (creatingTech || busy) return;
-    const nameEn = newTechEn.trim();
-    const nameEs = newTechEs.trim();
-    if (!nameEn || !nameEs) {
-      setError('Completar nameEn y nameEs para crear la tech');
-      return;
-    }
-    setCreatingTech(true);
-    setError(null);
-    try {
-      const created = await actions.createEntryAction({
-        contentTypeId: 'tech',
-        fields: { nameEn, nameEs },
-      });
-      await actions.publishEntryAction(created.id);
-      setDraft((prev) => {
-        const next = [...prev.techs];
-        if (!next.some((l) => l.sys.id === created.id)) next.push(toLink(created.id));
-        return { ...prev, techs: next };
-      });
-      setNewTechEn('');
-      setNewTechEs('');
-      setTechPickerKey((k) => k + 1);
-    } catch (e) {
-      setError(e instanceof Error ? e.message : 'Failed to create tech');
-    } finally {
-      setCreatingTech(false);
-    }
-  }, [actions, busy, creatingTech, newTechEn, newTechEs]);
-
   return (
     <>
       <Sheet open={open} onOpenChange={onOpenChange}>
@@ -282,7 +242,8 @@ export function HubExperienceSideSheet(props: {
             <SheetTitle className="text-base">{title}</SheetTitle>
           </SheetHeader>
 
-          <div className="min-h-0 flex-1 overflow-auto p-4">
+          <div className="min-h-0 flex-1 overflow-auto">
+            <div className="p-4">
             {error ? <p className="mb-4 border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700">{error}</p> : null}
             {loadingEntry ? (
               <p className="flex items-center gap-2 text-sm text-neutral-500">
@@ -340,41 +301,17 @@ export function HubExperienceSideSheet(props: {
                     <Label className="text-sm">Techs</Label>
                   </div>
                   <div key={techPickerKey}>
-                    <EntryReferenceMultiSelect
+                    <HubTechsPicker
                       value={draft.techs}
                       onChange={(next) => setField('techs', next)}
-                      managementApiRoot={HUB_MANAGEMENT_API}
-                      sourceContentTypeId="tech"
                       entryLocale={entryLocale}
-                      searchPlaceholder="Buscar techs…"
+                      managementApiRoot={HUB_MANAGEMENT_API}
                     />
                   </div>
-
-                  <div className="rounded-lg border border-neutral-200 p-3">
-                    <p className="text-xs font-medium text-neutral-700">Create new tech</p>
-                    <div className="mt-3 grid gap-3 md:grid-cols-2">
-                      <div className="grid gap-2">
-                        <Label className="text-xs text-neutral-600">Name EN</Label>
-                        <Input value={newTechEn} onChange={(e) => setNewTechEn(e.target.value)} placeholder="e.g. React" />
-                      </div>
-                      <div className="grid gap-2">
-                        <Label className="text-xs text-neutral-600">Name ES</Label>
-                        <Input value={newTechEs} onChange={(e) => setNewTechEs(e.target.value)} placeholder="e.g. React" />
-                      </div>
-                    </div>
-                    <div className="mt-3 flex justify-end">
-                      <Button type="button" size="sm" onClick={() => void createTechInline()} disabled={creatingTech || busy}>
-                        {creatingTech ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <Plus className="mr-2 h-4 w-4" />}
-                        Create tech
-                      </Button>
-                    </div>
-                  </div>
-                  <p className="text-xs text-neutral-500">
-                    Tip: podés seleccionar múltiples techs y también crear una nueva tech acá mismo.
-                  </p>
                 </div>
               </div>
             )}
+          </div>
           </div>
 
           <SheetFooter className="border-t border-neutral-200">

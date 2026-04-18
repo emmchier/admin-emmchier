@@ -1,3 +1,5 @@
+import { contentfulService } from '@/services/contentfulService';
+
 type Preview = { assetId: string; url: string | null; title: string | null };
 
 const cache = new Map<string, Preview>();
@@ -14,9 +16,8 @@ export async function getHubAssetPreview(assetId: string): Promise<Preview> {
   if (pending) return pending;
 
   const run = (async () => {
-    const res = await fetch(`/api/contentful/hub/assets?ids=${encodeURIComponent(id)}`, { cache: 'no-store' });
-    const data = (await res.json()) as any;
-    const item = (data?.items?.[0] ?? null) as Preview | null;
+    const items = await contentfulService.getAssetPreviews({ space: 'hub', assetIds: [id] });
+    const item = (items?.[0] ?? null) as Preview | null;
     const normalized: Preview = item && item.assetId ? item : { assetId: id, url: null, title: null };
     cache.set(id, normalized);
     return normalized;

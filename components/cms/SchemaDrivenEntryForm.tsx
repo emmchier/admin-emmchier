@@ -9,13 +9,25 @@ import { Textarea } from '@/components/ui/textarea';
 import { Label } from '@/components/ui/label';
 import { Switch } from '@/components/ui/switch';
 import { Separator } from '@/components/ui/separator';
-import { ProjectGalleryUploader, type ProjectGalleryUploaderHandle } from '@/components/cms/ProjectGalleryUploader';
+import {
+  ProjectGalleryUploader,
+  type ProjectGalleryUploaderHandle,
+} from '@/components/cms/ProjectGalleryUploader';
 import { EntryReferenceMultiSelect } from '@/components/cms/EntryReferenceMultiSelect';
 import { EntryReferenceMultiTypeSelect } from '@/components/cms/EntryReferenceMultiTypeSelect';
 import { ProjectTechsPicker } from '@/components/cms/ProjectTechsPicker';
 import { useProjectEditorStore } from '@/lib/stores/projectEditorStore';
-import { RichTextViewer } from '@/components/cms/RichTextViewer';
+import { RichTextEditor } from '@/components/cms/RichTextEditor';
 import { ExternalLink } from 'lucide-react';
+import { readInitialFieldValue } from '@/lib/contentful/readInitialFieldValue';
+import { coerceRichTextDocument } from '@/lib/contentful/coerceRichTextDocument';
+import { emptyContentfulDocument } from '@/lib/contentful/contentfulTiptapBridge';
+import { cn } from '@/lib/utils';
+import {
+  clampEntryFieldString,
+  EntryFieldCharacterFooter,
+  ENTRY_FIELD_CHAR_LIMIT,
+} from '@/components/cms/entryFieldCharacterLimit';
 
 type JsonPrimitive = string | number | boolean | null;
 type JsonValue = JsonPrimitive | JsonValue[] | { [k: string]: JsonValue };
@@ -33,6 +45,11 @@ type Props = {
   hideHeader?: boolean;
   hideSubmit?: boolean;
   onValuesChange?: (values: Record<string, JsonValue>) => void;
+  /**
+   * Bump after revert (or similar) so local `values` rehydrate from `initialFields` even when
+   * their JSON fingerprint matches a previous sync (e.g. entry.fields unchanged on disk while the user edited).
+   */
+  formHydrationKey?: number;
 };
 
 function slugifyTitle(title: string): string {
@@ -58,29 +75,30 @@ function isArrayOfSymbols(items: any) {
 }
 
 function linkContentTypesForEntryArrayField(field: any): string[] {
-  const v = field?.items?.validations?.find((x: any) => Array.isArray(x?.linkContentType))?.linkContentType;
+  const v = field?.items?.validations?.find((x: any) =>
+    Array.isArray(x?.linkContentType)
+  )?.linkContentType;
   return Array.isArray(v) ? v : [];
 }
 
-function readInitial(initialFields: Record<string, any> | undefined, fieldId: string, locale: string) {
-  const raw = initialFields?.[fieldId];
-  if (raw == null) return undefined;
-  // CDA: field may be a resolved scalar (not wrapped per locale).
-  if (typeof raw === 'string' || typeof raw === 'number' || typeof raw === 'boolean') {
-    return raw;
+/** Project editor: Gallery → Techs → Making Of regardless of Contentful field order. */
+function orderProjectFields<T extends { id: string }>(fields: T[]): T[] {
+  const blockIds = ['gallery', 'techs', 'makingOf'] as const;
+  const set = new Set<string>(blockIds);
+  const byId = new Map(fields.map((f) => [f.id, f]));
+  const blockFields = blockIds.map((id) => byId.get(id)).filter((f): f is T => Boolean(f));
+  const rest = fields.filter((f) => !set.has(f.id));
+  let insertAt = fields.findIndex((f) => f.id === 'gallery');
+  if (insertAt < 0) insertAt = fields.findIndex((f) => f.id === 'techs');
+  if (insertAt < 0) insertAt = fields.findIndex((f) => f.id === 'makingOf');
+  if (insertAt < 0) {
+    return [...rest, ...blockFields];
   }
-  // CDA: arrays are already resolved (e.g. gallery links, tech links).
-  if (Array.isArray(raw)) return raw;
-  if (typeof raw !== 'object') return undefined;
-  const o = raw as Record<string, any>;
-  // CDA: single link values are objects with `sys`.
-  if (o.sys != null && typeof o.sys === 'object') return o;
-  // CDA: RichText documents are objects with `nodeType: 'document'`.
-  if (o.nodeType === 'document') return o;
-  const localized = o[locale] ?? o['en-US'];
-  if (localized !== undefined && localized !== null) return localized;
-  const vals = Object.values(o);
-  return vals.length ? vals[0] : undefined;
+  let restBefore = 0;
+  for (let i = 0; i < insertAt; i++) {
+    if (!set.has(fields[i]!.id)) restBefore++;
+  }
+  return [...rest.slice(0, restBefore), ...blockFields, ...rest.slice(restBefore)];
 }
 
 export function SchemaDrivenEntryForm(props: Props) {
@@ -97,17 +115,25 @@ export function SchemaDrivenEntryForm(props: Props) {
     hideHeader,
     hideSubmit,
     onValuesChange,
-  } =
-    props;
+    formHydrationKey = 0,
+  } = props;
   const [busy, setBusy] = React.useState(false);
   const [error, setError] = React.useState<string | null>(null);
   const setField = useProjectEditorStore((s) => s.setField);
+  const formDirty = useProjectEditorStore((s) => s.isDirty);
   const markSlugManual = useProjectEditorStore((s) => s.markSlugManual);
-  const applySlugFromTitleIfAllowed = useProjectEditorStore((s) => s.applySlugFromTitleIfAllowed);
+  const applySlugFromTitleIfAllowed = useProjectEditorStore(
+    (s) => s.applySlugFromTitleIfAllowed
+  );
 
   const fields = React.useMemo(() => {
     return (contentType.fields || []).filter(isEditableField);
   }, [contentType.fields]);
+
+  const fieldsForRender = React.useMemo(() => {
+    if (contentType.sys?.id !== 'project') return fields;
+    return orderProjectFields(fields);
+  }, [contentType.sys?.id, fields]);
 
   const isProject = contentType.sys?.id === 'project';
   const galleryRef = React.useRef<ProjectGalleryUploaderHandle | null>(null);
@@ -118,18 +144,31 @@ export function SchemaDrivenEntryForm(props: Props) {
         <span>{f.name || f.id}</span>
         <span className="text-neutral-400">|</span>
         <span className="italic text-neutral-500">{String(f.id)}</span>
-        {required ? <span className="text-xs font-normal text-neutral-500">(required)</span> : null}
+        {required ? (
+          <span className="text-xs font-normal text-neutral-500">
+            (required)
+          </span>
+        ) : null}
       </div>
     );
   }, []);
 
-  const contentTypeHasSlugField = React.useMemo(() => fields.some((f) => f.id === 'slug'), [fields]);
+  const contentTypeHasSlugField = React.useMemo(
+    () => fields.some((f) => f.id === 'slug'),
+    [fields]
+  );
 
   const [values, setValues] = React.useState<Record<string, JsonValue>>(() => {
     const v: Record<string, JsonValue> = {};
     for (const f of fields) {
-      const init = readInitial(initialFields, f.id, locale);
-      if (init !== undefined) v[f.id] = init as JsonValue;
+      const init = readInitialFieldValue(initialFields, f.id, locale);
+      if (init === undefined) continue;
+      const t = fieldType(f);
+      if ((t === 'Symbol' || t === 'Text') && typeof init === 'string') {
+        v[f.id] = clampEntryFieldString(init);
+      } else {
+        v[f.id] = init as JsonValue;
+      }
     }
     return v;
   });
@@ -139,22 +178,73 @@ export function SchemaDrivenEntryForm(props: Props) {
   React.useEffect(() => {
     const initial: Record<string, any> = {};
     for (const f of fields) {
-      const init = readInitial(initialFields, f.id, locale);
-      if (init !== undefined) initial[f.id] = init;
+      const init = readInitialFieldValue(initialFields, f.id, locale);
+      if (init === undefined) continue;
+      const t = fieldType(f);
+      if ((t === 'Symbol' || t === 'Text') && typeof init === 'string') {
+        initial[f.id] = clampEntryFieldString(init);
+      } else {
+        initial[f.id] = init;
+      }
     }
-    const fp = JSON.stringify(initial);
+    const fp = `${formHydrationKey}:${JSON.stringify(initial)}`;
     if (fp === lastInitialFpRef.current) return;
     lastInitialFpRef.current = fp;
 
     // Sync form local state + store baseline when the loaded entry changes.
     setValues(initial as Record<string, JsonValue>);
     useProjectEditorStore.getState().reset(initial as any);
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [contentType.sys?.id, initialFields, locale]);
+  }, [contentType.sys?.id, fields, initialFields, locale, formHydrationKey]);
 
   const setValue = React.useCallback((id: string, next: JsonValue) => {
     setValues((prev) => ({ ...prev, [id]: next }));
   }, []);
+
+  const emptyRtSignature = React.useMemo(
+    () => JSON.stringify(emptyContentfulDocument()),
+    [],
+  );
+
+  /** Repair Rich Text local state when it stayed empty but CMA fields have content (stale TipTap onChange wipe). */
+  React.useLayoutEffect(() => {
+    if (formDirty) return;
+    for (const f of fields) {
+      if (fieldType(f) !== 'RichText') continue;
+      const fromInitial = readInitialFieldValue(initialFields, f.id, locale);
+      const ci = coerceRichTextDocument(fromInitial as unknown);
+      if (!ci || JSON.stringify(ci) === emptyRtSignature) continue;
+      const raw = values[f.id];
+      const asPayload = ci as unknown as JsonValue;
+      if (raw === undefined || raw === null) {
+        setValue(f.id, asPayload);
+        setField(f.id, asPayload);
+        continue;
+      }
+      if (typeof raw === 'string') {
+        const t = raw.trim();
+        const looksEmpty =
+          t === '' || t === '<p></p>' || /^<p>\s*<\/p>$/i.test(t);
+        if (!looksEmpty) continue;
+        setValue(f.id, asPayload);
+        setField(f.id, asPayload);
+        continue;
+      }
+      const cv = coerceRichTextDocument(raw as unknown);
+      if (cv && JSON.stringify(cv) === emptyRtSignature) {
+        setValue(f.id, asPayload);
+        setField(f.id, asPayload);
+      }
+    }
+  }, [
+    formDirty,
+    fields,
+    initialFields,
+    locale,
+    values,
+    setValue,
+    setField,
+    emptyRtSignature,
+  ]);
 
   React.useEffect(() => {
     onValuesChange?.(values);
@@ -174,52 +264,64 @@ export function SchemaDrivenEntryForm(props: Props) {
         setBusy(false);
       }
     },
-    [busy, onSubmit, values],
+    [busy, onSubmit, values]
   );
 
   return (
-    <form id={formId} onSubmit={handleSubmit} className="space-y-6">
+    <form
+      id={formId}
+      onSubmit={handleSubmit}
+      className={cn(isProject ? 'space-y-8' : 'space-y-6')}
+    >
       {!hideHeader ? (
         <>
           <div className="space-y-2">
-            <h1 className="text-lg font-semibold text-zinc-900">{contentType.name}</h1>
+            <h1 className="text-lg font-semibold text-zinc-900">
+              {contentType.name}
+            </h1>
           </div>
           <Separator />
         </>
       ) : null}
 
-      <div className="space-y-5">
+      <div className={cn(isProject ? 'space-y-8' : 'space-y-5')}>
         {isProject ? (
-          <div className="flex flex-col gap-4 md:flex-row md:items-stretch">
+          <div className="flex flex-col gap-8 md:flex-row md:items-stretch">
             <div className="w-full md:w-1/2">
-              <div className="grid gap-4">
+              <div className="grid gap-8">
                 {(() => {
                   const f = fields.find((x) => x.id === 'title');
                   if (!f) return null;
                   const v = values[f.id];
                   const required = Boolean(f.required);
+                  const str = typeof v === 'string' ? v : '';
                   return (
                     <div className="grid gap-2">
-                      <Label htmlFor={f.id}>{sectionHeading(f, required)}</Label>
+                      <Label htmlFor={f.id}>
+                        {sectionHeading(f, required)}
+                      </Label>
                       <Input
                         id={f.id}
-                        value={typeof v === 'string' ? v : ''}
+                        value={str}
+                        maxLength={ENTRY_FIELD_CHAR_LIMIT}
                         className="w-full"
                         onChange={(e) => {
-                          const next = e.target.value;
+                          const next = clampEntryFieldString(e.target.value);
                           setValue(f.id, next);
                           setField(f.id, next);
                           if (contentTypeHasSlugField) {
                             const st = useProjectEditorStore.getState();
                             if (!st.slugManuallyEdited) {
                               const slug = slugifyTitle(next);
-                              setValue('slug', slug);
-                              setField('slug', slug);
+                              const slugClamped = clampEntryFieldString(slug);
+                              setValue('slug', slugClamped);
+                              setField('slug', slugClamped);
                             }
                             applySlugFromTitleIfAllowed();
                           }
                         }}
                       />
+                      <EntryFieldCharacterFooter length={str.length} />
                     </div>
                   );
                 })()}
@@ -228,20 +330,25 @@ export function SchemaDrivenEntryForm(props: Props) {
                   if (!f) return null;
                   const v = values[f.id];
                   const required = Boolean(f.required);
+                  const slugStr = typeof v === 'string' ? v : '';
                   return (
                     <div className="grid gap-2">
-                      <Label htmlFor={f.id}>{sectionHeading(f, required)}</Label>
+                      <Label htmlFor={f.id}>
+                        {sectionHeading(f, required)}
+                      </Label>
                       <Input
                         id={f.id}
-                        value={typeof v === 'string' ? v : ''}
+                        value={slugStr}
+                        maxLength={ENTRY_FIELD_CHAR_LIMIT}
                         className="w-full"
                         onChange={(e) => {
-                          const next = e.target.value;
+                          const next = clampEntryFieldString(e.target.value);
                           setValue(f.id, next);
                           setField(f.id, next);
                           markSlugManual();
                         }}
                       />
+                      <EntryFieldCharacterFooter length={slugStr.length} />
                     </div>
                   );
                 })()}
@@ -254,20 +361,23 @@ export function SchemaDrivenEntryForm(props: Props) {
                 if (!f) return null;
                 const v = values[f.id];
                 const required = Boolean(f.required);
+                const descStr = typeof v === 'string' ? v : '';
                 return (
                   <div className="flex min-h-0 flex-1 flex-col gap-2">
                     <Label htmlFor={f.id}>{sectionHeading(f, required)}</Label>
                     <Textarea
                       id={f.id}
-                      value={typeof v === 'string' ? v : ''}
+                      value={descStr}
+                      maxLength={ENTRY_FIELD_CHAR_LIMIT}
                       onChange={(e) => {
-                        const next = e.target.value;
+                        const next = clampEntryFieldString(e.target.value);
                         setValue(f.id, next);
                         setField(f.id, next);
                       }}
                       onBlur={(e) => setField(f.id, e.target.value)}
                       className="min-h-0 flex-1 resize-none"
                     />
+                    <EntryFieldCharacterFooter length={descStr.length} />
                   </div>
                 );
               })()}
@@ -275,8 +385,12 @@ export function SchemaDrivenEntryForm(props: Props) {
           </div>
         ) : null}
 
-        {fields.map((f) => {
-          if (isProject && (f.id === 'title' || f.id === 'slug' || f.id === 'description')) return null;
+        {fieldsForRender.map((f) => {
+          if (
+            isProject &&
+            (f.id === 'title' || f.id === 'slug' || f.id === 'description')
+          )
+            return null;
           const t = fieldType(f);
           const v = values[f.id];
           const required = Boolean(f.required);
@@ -288,45 +402,52 @@ export function SchemaDrivenEntryForm(props: Props) {
           );
 
           if (t === 'Symbol') {
+            const symStr = typeof v === 'string' ? v : '';
             return (
               <div key={f.id} className="grid gap-2">
                 {label}
                 <Input
                   id={f.id}
-                  value={typeof v === 'string' ? v : ''}
+                  value={symStr}
+                  maxLength={ENTRY_FIELD_CHAR_LIMIT}
                   onChange={(e) => {
-                    const next = e.target.value;
+                    const next = clampEntryFieldString(e.target.value);
                     setValue(f.id, next);
                     setField(f.id, next);
                     if (contentTypeHasSlugField) {
                       if (f.id === 'slug') markSlugManual();
-                      if (f.id === 'title' || f.id === 'name') applySlugFromTitleIfAllowed();
+                      if (f.id === 'title' || f.id === 'name')
+                        applySlugFromTitleIfAllowed();
                     }
                   }}
                 />
+                <EntryFieldCharacterFooter length={symStr.length} />
               </div>
             );
           }
 
           if (t === 'Text') {
             const isDescription = f.id === 'description';
+            const textStr = typeof v === 'string' ? v : '';
             return (
               <div key={f.id} className="grid gap-2">
                 {label}
                 <Textarea
                   id={f.id}
-                  value={typeof v === 'string' ? v : ''}
+                  value={textStr}
+                  maxLength={ENTRY_FIELD_CHAR_LIMIT}
                   onChange={(e) => {
-                    const next = e.target.value;
+                    const next = clampEntryFieldString(e.target.value);
                     setValue(f.id, next);
                   }}
                   onBlur={(e) => {
-                    const next = e.target.value;
+                    const next = clampEntryFieldString(e.target.value);
                     setField(f.id, next);
                   }}
                   rows={isDescription ? 8 : 4}
-                  className={isDescription ? 'max-h-50 overflow-y-auto resize-none' : undefined}
+                  className={isDescription ? 'min-h-48 resize-y' : undefined}
                 />
+                <EntryFieldCharacterFooter length={textStr.length} />
               </div>
             );
           }
@@ -339,8 +460,15 @@ export function SchemaDrivenEntryForm(props: Props) {
                   id={f.id}
                   type="number"
                   value={typeof v === 'number' ? String(v) : ''}
-                  onChange={(e) => setValue(f.id, e.target.value === '' ? null : Number(e.target.value))}
-                  onBlur={() => setField(f.id, typeof v === 'number' ? v : null)}
+                  onChange={(e) =>
+                    setValue(
+                      f.id,
+                      e.target.value === '' ? null : Number(e.target.value)
+                    )
+                  }
+                  onBlur={() =>
+                    setField(f.id, typeof v === 'number' ? v : null)
+                  }
                 />
               </div>
             );
@@ -348,12 +476,18 @@ export function SchemaDrivenEntryForm(props: Props) {
 
           if (t === 'Boolean') {
             return (
-              <div key={f.id} className="flex items-center justify-between gap-3 border border-neutral-200 px-4 py-4">
+              <div
+                key={f.id}
+                className="flex items-center justify-between gap-3 border border-neutral-200 px-4 py-4"
+              >
                 <div className="grid gap-0.5">
                   <Label htmlFor={f.id} className="text-sm">
-                    {f.name || f.id} <span className="text-xs text-zinc-500">({f.id})</span>
+                    {f.name || f.id}{' '}
+                    <span className="text-xs text-zinc-500">({f.id})</span>
                   </Label>
-                  <p className="text-xs text-zinc-500">{required ? 'required' : 'optional'}</p>
+                  <p className="text-xs text-zinc-500">
+                    {required ? 'required' : 'optional'}
+                  </p>
                 </div>
                 <Switch
                   id={f.id}
@@ -381,7 +515,7 @@ export function SchemaDrivenEntryForm(props: Props) {
                       e.target.value
                         .split('\n')
                         .map((s) => s.trim())
-                        .filter(Boolean),
+                        .filter(Boolean)
                     )
                   }
                   onBlur={() => setField(f.id, Array.isArray(v) ? v : [])}
@@ -392,14 +526,23 @@ export function SchemaDrivenEntryForm(props: Props) {
             );
           }
 
-          if (t === 'Array' && f.items?.type === 'Link' && f.items?.linkType === 'Entry') {
+          if (
+            t === 'Array' &&
+            f.items?.type === 'Link' &&
+            f.items?.linkType === 'Entry'
+          ) {
             const links = Array.isArray(v) ? v : [];
             if (f.id === 'gallery') {
               return (
                 <div key={f.id} className="grid gap-2">
                   <div className="flex items-center justify-between gap-3">
                     {sectionHeading({ ...f, name: 'Gallery' }, required)}
-                    <Button type="button" variant="outline" size="sm" onClick={() => galleryRef.current?.open?.()}>
+                    <Button
+                      type="button"
+                      variant="outline"
+                      size="sm"
+                      onClick={() => galleryRef.current?.open?.()}
+                    >
                       Add images
                     </Button>
                   </div>
@@ -411,7 +554,9 @@ export function SchemaDrivenEntryForm(props: Props) {
                       setField(f.id, next as any);
                     }}
                     managementApiRoot={managementApiRoot}
-                    projectSlug={typeof values.slug === 'string' ? values.slug : undefined}
+                    projectSlug={
+                      typeof values.slug === 'string' ? values.slug : undefined
+                    }
                   />
                 </div>
               );
@@ -419,9 +564,9 @@ export function SchemaDrivenEntryForm(props: Props) {
 
             if (contentType.sys?.id === 'project' && f.id === 'techs') {
               return (
-                <div key={f.id} className="grid gap-2">
-                  {label}
+                <div key={f.id}>
                   <ProjectTechsPicker
+                    heading={sectionHeading(f, required)}
                     value={links as any}
                     onChange={(next) => {
                       setValue(f.id, next as any);
@@ -471,13 +616,35 @@ export function SchemaDrivenEntryForm(props: Props) {
             }
           }
 
-          if (f.id === 'makingOf' && t === 'RichText') {
+          if (t === 'RichText') {
             const spaceId = contentfulSpaceId ?? null;
             const canOpen = Boolean(spaceId && entryId);
             const href =
               spaceId && entryId
                 ? `https://app.contentful.com/spaces/${encodeURIComponent(spaceId)}/entries/${encodeURIComponent(entryId)}`
                 : '#';
+
+            const fromInitial = readInitialFieldValue(initialFields, f.id, locale);
+            const ci = coerceRichTextDocument(fromInitial as unknown);
+            const cv =
+              typeof v === 'string' ? null : coerceRichTextDocument(v as unknown);
+            const emptySig = JSON.stringify(emptyContentfulDocument());
+            let richInput: React.ComponentProps<typeof RichTextEditor>['value'];
+            if (typeof v === 'string') {
+              richInput = v;
+            } else {
+              let richDoc = cv ?? ci;
+              if (
+                !formDirty &&
+                cv != null &&
+                ci != null &&
+                JSON.stringify(cv) === emptySig &&
+                JSON.stringify(ci) !== emptySig
+              ) {
+                richDoc = ci;
+              }
+              richInput = richDoc ?? undefined;
+            }
 
             return (
               <div key={f.id} className="grid gap-2">
@@ -488,7 +655,10 @@ export function SchemaDrivenEntryForm(props: Props) {
                     target="_blank"
                     rel="noopener noreferrer"
                     aria-disabled={!canOpen}
-                    className={buttonVariants({ variant: 'outline', size: 'sm' })}
+                    className={buttonVariants({
+                      variant: 'outline',
+                      size: 'sm',
+                    })}
                     onClick={(e) => {
                       if (!canOpen) e.preventDefault();
                     }}
@@ -497,9 +667,21 @@ export function SchemaDrivenEntryForm(props: Props) {
                     Editar en Contentful
                   </a>
                 </div>
-                <div className="border border-neutral-200 p-4">
-                  <RichTextViewer managementApiRoot={managementApiRoot} value={v as any} />
-                </div>
+                <RichTextEditor
+                  key={`rte-${entryId ?? 'new'}-${f.id}-${formHydrationKey}`}
+                  value={richInput}
+                  managementApiRoot={managementApiRoot}
+                  onChange={(next) => {
+                    const payload = next as unknown as JsonValue;
+                    setValue(f.id, payload);
+                    setField(f.id, payload);
+                  }}
+                  helperText={
+                    f.id === 'makingOf'
+                      ? 'Artículo contando el proceso del proyecto.'
+                      : undefined
+                  }
+                />
               </div>
             );
           }
@@ -509,7 +691,8 @@ export function SchemaDrivenEntryForm(props: Props) {
             <div key={f.id} className="grid gap-2">
               {label}
               <div className="border border-neutral-200 bg-neutral-50/80 p-4 text-sm text-neutral-700">
-                Unsupported field type for now: <span className="font-mono">{t}</span>
+                Unsupported field type for now:{' '}
+                <span className="font-mono">{t}</span>
               </div>
             </div>
           );
@@ -517,7 +700,9 @@ export function SchemaDrivenEntryForm(props: Props) {
       </div>
 
       {error ? (
-        <p className="border border-red-200 bg-red-50 px-4 py-4 text-sm text-red-700">{error}</p>
+        <p className="border border-red-200 bg-red-50 px-4 py-4 text-sm text-red-700">
+          {error}
+        </p>
       ) : null}
 
       {!hideSubmit ? (
@@ -530,4 +715,3 @@ export function SchemaDrivenEntryForm(props: Props) {
     </form>
   );
 }
-

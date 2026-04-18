@@ -25,7 +25,8 @@ export function Sidebar({ active, onChange, onLogoClick }: SidebarProps) {
         </button>
       </div>
 
-      <div className="flex min-h-0 flex-1 flex-col overflow-auto px-4 py-4">
+      <div className="flex min-h-0 flex-1 flex-col overflow-auto py-4">
+        <div className="px-4">
         <p className="text-xs font-semibold uppercase tracking-wide text-neutral-500">Spaces</p>
         <nav className="mt-4 flex flex-col gap-3" aria-label="Spaces">
           {SPACES.map((id) => {
@@ -53,6 +54,7 @@ export function Sidebar({ active, onChange, onLogoClick }: SidebarProps) {
             );
           })}
         </nav>
+        </div>
       </div>
 
       <div className="shrink-0 border-t border-neutral-200 px-4 py-4">

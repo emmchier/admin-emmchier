@@ -6,6 +6,7 @@ import { ScrollArea } from '@/components/ui/scroll-area';
 import { Badge } from '@/components/ui/badge';
 import { X } from 'lucide-react';
 import { readLocalizedField } from '@/lib/contentful/readLocalizedField';
+import { contentfulService } from '@/services/contentfulService';
 
 export type EntryLink = { sys: { type: 'Link'; linkType: 'Entry'; id: string } };
 
@@ -27,14 +28,6 @@ function readEntryLabel(entry: any, locale: string): string {
   return entry?.sys?.id ?? '';
 }
 
-async function fetchEntriesByType(managementApiRoot: string, contentTypeId: string, limit: number) {
-  const q = new URLSearchParams({ contentType: contentTypeId, limit: String(limit), skip: '0' });
-  const res = await fetch(`${managementApiRoot}/entries?${q}`, { cache: 'no-store' });
-  const data = (await res.json()) as any;
-  if (!res.ok) throw new Error(data?.error || 'Failed to load entries');
-  return (data.items || []) as any[];
-}
-
 export function EntryReferenceMultiSelect(props: {
   value: EntryLink[];
   onChange: (next: EntryLink[]) => void;
@@ -50,7 +43,7 @@ export function EntryReferenceMultiSelect(props: {
     managementApiRoot = '/api/contentful',
     sourceContentTypeId,
     entryLocale,
-    searchPlaceholder = 'Buscar…',
+  searchPlaceholder = 'Search…',
     emptyListHint = 'No hay coincidencias.',
   } = props;
 
@@ -62,7 +55,8 @@ export function EntryReferenceMultiSelect(props: {
     let cancelled = false;
     (async () => {
       try {
-        const items = await fetchEntriesByType(managementApiRoot, sourceContentTypeId, 500);
+        const space = contentfulService.inferSpaceFromManagementApiRoot(managementApiRoot);
+        const items = await contentfulService.getEntriesCached({ space, contentTypeId: sourceContentTypeId });
         if (!cancelled) {
           setCandidates(items);
           setLoadError(null);

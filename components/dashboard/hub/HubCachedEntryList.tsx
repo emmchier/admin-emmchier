@@ -3,9 +3,9 @@
 import * as React from 'react';
 import { ChevronRight } from 'lucide-react';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
-import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
+import { StatusBadge } from '@/components/ui/status-badge';
 import {
   Pagination,
   PaginationContent,
@@ -15,11 +15,9 @@ import {
   PaginationNext,
   PaginationPrevious,
 } from '@/components/ui/pagination';
-import { isEntryPublished } from '@/lib/contentful/isEntryPublished';
 import { readLocalizedField } from '@/lib/contentful/readLocalizedField';
 import type { HubModelName } from '@/lib/store/hubStore';
 import { useHubStore } from '@/lib/store/hubStore';
-import { ensureHubModelLoaded } from '@/lib/store/ensureHubModelLoaded';
 
 const PAGE_SIZE = 8;
 
@@ -85,7 +83,6 @@ export function HubCachedEntryList(props: {
   const record = useHubStore(selectRecord(model));
   const loaded = useHubStore((s) => s.loaded[model]);
 
-  const [busy, setBusy] = React.useState(false);
   const [error, setError] = React.useState<string | null>(null);
   const [searchInput, setSearchInput] = React.useState('');
   const [debouncedSearch, setDebouncedSearch] = React.useState('');
@@ -102,25 +99,8 @@ export function HubCachedEntryList(props: {
     return () => window.clearTimeout(t);
   }, [searchInput]);
 
-  const load = React.useCallback(
-    async (force?: boolean) => {
-      setBusy(true);
-      setError(null);
-      try {
-        await ensureHubModelLoaded(model, { force });
-      } catch (e) {
-        setError(e instanceof Error ? e.message : 'Failed to load');
-      } finally {
-        setBusy(false);
-      }
-    },
-    [model],
-  );
-
-  React.useEffect(() => {
-    if (loaded) return;
-    void load(false);
-  }, [load, loaded]);
+  // IMPORTANT: this list never triggers loading on mount.
+  // The dashboard layer must call `contentfulService` on navigation/mutations (Zustand-first).
 
   const allSorted = React.useMemo(() => {
     const arr = Object.values(record) as any[];
@@ -170,9 +150,9 @@ export function HubCachedEntryList(props: {
                 type="search"
                 value={searchInput}
                 onChange={(e) => setSearchInput(e.target.value)}
-                placeholder="Buscar…"
+                placeholder="Search…"
                 className="mb-4 max-w-sm min-w-48"
-                aria-label="Filtrar entradas"
+                aria-label="Filter entries"
               />
               {showPagination ? (
                 <Pagination className="mx-0 w-auto justify-end">
@@ -180,7 +160,7 @@ export function HubCachedEntryList(props: {
                     <PaginationItem>
                       <PaginationPrevious
                         href="#"
-                        text="Anterior"
+                        text="Previous"
                         className={page <= 1 ? 'pointer-events-none opacity-40' : ''}
                         onClick={(e) => {
                           e.preventDefault();
@@ -213,7 +193,7 @@ export function HubCachedEntryList(props: {
                     <PaginationItem>
                       <PaginationNext
                         href="#"
-                        text="Siguiente"
+                        text="Next"
                         className={page >= totalPages ? 'pointer-events-none opacity-40' : ''}
                         onClick={(e) => {
                           e.preventDefault();
@@ -227,7 +207,8 @@ export function HubCachedEntryList(props: {
             </div>
           </div>
 
-          <div className="mt-0 min-h-0 flex-1 overflow-auto px-4 pb-[72px] pt-0">
+          <div className="mt-0 min-h-0 flex-1 overflow-auto pb-[72px] pt-0">
+            <div className="px-4">
             {error ? <p className="mb-4 border border-red-200 bg-red-50 px-4 py-4 text-sm text-red-700">{error}</p> : null}
 
             <div className="overflow-hidden rounded-lg border border-neutral-200 bg-white">
@@ -238,7 +219,7 @@ export function HubCachedEntryList(props: {
                     <TableHead className="h-auto text-left text-neutral-700">Status</TableHead>
                     <TableHead className="h-auto text-left text-neutral-700">Updated</TableHead>
                     <TableHead className="h-auto w-12 min-w-12 px-4 text-left text-neutral-700">
-                      <span className="sr-only">Abrir detalle</span>
+                      <span className="sr-only">Open details</span>
                     </TableHead>
                   </TableRow>
                 </TableHeader>
@@ -265,17 +246,11 @@ export function HubCachedEntryList(props: {
                               onEdit(e.sys.id);
                             }
                           }}
-                          aria-label={`Editar: ${primary || 'entrada'}`}
+                          aria-label={`Edit: ${primary || 'entry'}`}
                         >
                           <TableCell className="text-left font-medium">{primary}</TableCell>
                           <TableCell className="text-left">
-                            {isEntryPublished(e.sys) ? (
-                              <Badge className="border-transparent bg-emerald-600 text-white hover:bg-emerald-600" variant="default">
-                                Published
-                              </Badge>
-                            ) : (
-                              <Badge variant="secondary">Draft</Badge>
-                            )}
+                            <StatusBadge entry={e} />
                           </TableCell>
                           <TableCell className="text-left text-sm text-neutral-600">{new Date(e.sys.updatedAt).toLocaleString()}</TableCell>
                           <TableCell className="w-12 min-w-12 px-4 text-left text-neutral-400">
@@ -286,6 +261,7 @@ export function HubCachedEntryList(props: {
                     })}
                 </TableBody>
               </Table>
+            </div>
             </div>
           </div>
         </div>

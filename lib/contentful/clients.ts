@@ -4,8 +4,10 @@ import { createClient as createDeliveryClient } from 'contentful';
 import { createClient as createManagementClient } from 'contentful-management';
 import type { ContentfulClientApi } from 'contentful';
 import type { PlainClientAPI } from 'contentful-management';
+import type { SpaceId } from '@/lib/spaces';
 
-export type ContentfulSpaceKey = 'art' | 'hub';
+/** Maps 1:1 to `SpaceId` for Contentful client wiring. */
+export type ContentfulSpaceKey = SpaceId;
 
 export type ContentfulClients = {
   spaceId: string;
@@ -33,10 +35,17 @@ function requireSpaceConfig(space: ContentfulSpaceKey) {
       managementToken: requireEnv('CONTENTFUL_ART_MANAGEMENT_TOKEN'),
     };
   }
+  if (space === 'hub') {
+    return {
+      spaceId: requireEnv('CONTENTFUL_SPACE_HUB_ID'),
+      deliveryToken: requireEnv('CONTENTFUL_HUB_DELIVERY_TOKEN'),
+      managementToken: requireEnv('CONTENTFUL_HUB_MANAGEMENT_TOKEN'),
+    };
+  }
   return {
-    spaceId: requireEnv('CONTENTFUL_SPACE_HUB_ID'),
-    deliveryToken: requireEnv('CONTENTFUL_HUB_DELIVERY_TOKEN'),
-    managementToken: requireEnv('CONTENTFUL_HUB_MANAGEMENT_TOKEN'),
+    spaceId: requireEnv('CONTENTFUL_SPACE_DESIGN_ID'),
+    deliveryToken: requireEnv('CONTENTFUL_DESIGN_DELIVERY_TOKEN'),
+    managementToken: requireEnv('CONTENTFUL_DESIGN_MANAGEMENT_TOKEN'),
   };
 }
 
@@ -89,6 +98,16 @@ export function getClientsFor(space: ContentfulSpaceKey): ContentfulClients {
 
 export const artClients = getClientsFor('art');
 export const hubClients = getClientsFor('hub');
+
+let designClientsSingleton: ContentfulClients | null = null;
+
+/** Lazy init so apps without Design env still boot (routes hit Design only when used). */
+export function getDesignClients(): ContentfulClients {
+  if (!designClientsSingleton) {
+    designClientsSingleton = getClientsFor('design');
+  }
+  return designClientsSingleton;
+}
 
 export function getEntryLocale(): string {
   return readEnv('CONTENTFUL_ENTRY_LOCALE') ?? 'en-US';

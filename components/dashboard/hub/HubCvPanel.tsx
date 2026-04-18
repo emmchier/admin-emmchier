@@ -43,7 +43,8 @@ export function HubCvPanel() {
   const cv = data;
 
   return (
-    <div className="flex min-h-0 flex-1 flex-col gap-4 overflow-auto bg-white px-4 pb-8 pt-4">
+    <div className="flex min-h-0 flex-1 flex-col gap-4 overflow-auto bg-white pb-8 pt-4">
+      <div className="flex flex-col gap-4 px-4">
       <div className="flex flex-wrap items-center justify-between gap-3">
         <h2 className="text-base font-semibold text-neutral-900">Vista general del CV</h2>
         <Button type="button" variant="outline" size="sm" onClick={() => void load()} disabled={busy}>
@@ -163,6 +164,7 @@ export function HubCvPanel() {
           </div>
         ))}
       </CvSection>
+      </div>
     </div>
   );
 }

@@ -102,7 +102,7 @@ export function HubSocialNetworkDetail(props: {
           fields: {},
           sysPatch: { publishedAt: undefined, publishedVersion: 0, publishedCounter: 0 },
         });
-        toast.success('Oculto');
+        toast.success('Unpublished');
       } else {
         await actions.publishEntryAction(entryId);
         useHubStore.getState().updateFields('socialNetwork', {
@@ -111,7 +111,7 @@ export function HubSocialNetworkDetail(props: {
           fields: {},
           sysPatch: { publishedAt: new Date().toISOString(), publishedVersion: 1, publishedCounter: 1 },
         });
-        toast.success('Publicado');
+        toast.success('Published');
       }
     } catch (e) {
       toast.error(e instanceof Error ? e.message : 'Failed');
@@ -149,7 +149,7 @@ export function HubSocialNetworkDetail(props: {
               <h2 className="truncate text-base font-semibold text-neutral-900">{platform || 'Social Network'}</h2>
               <div className="mt-1">
                 <Badge className={published ? 'bg-emerald-600 text-white hover:bg-emerald-600' : ''} variant={published ? 'default' : 'secondary'}>
-                  {published ? 'Publicado' : 'Borrador'}
+                  {published ? 'Published' : 'Draft'}
                 </Badge>
               </div>
             </div>
@@ -169,7 +169,7 @@ export function HubSocialNetworkDetail(props: {
             </Button>
             <Button type="button" size="sm" onClick={() => void save()} disabled={busy || !dirty}>
               {busy ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : null}
-              Guardar cambios
+              Save changes
             </Button>
             <Button type="button" variant="outline" size="sm" onClick={() => void save()} disabled aria-hidden className="hidden">
               <RefreshCw className="h-4 w-4" />
@@ -178,7 +178,8 @@ export function HubSocialNetworkDetail(props: {
         </div>
       </div>
 
-      <div className="min-h-0 flex-1 overflow-auto px-4 pb-[72px] pt-4">
+      <div className="min-h-0 flex-1 overflow-auto pb-[72px] pt-4">
+        <div className="px-4">
         <div className="grid gap-4">
           <div className="grid gap-2">
             <Label className="text-sm">Platform</Label>
@@ -199,6 +200,7 @@ export function HubSocialNetworkDetail(props: {
               Delete
             </Button>
           </div>
+        </div>
         </div>
       </div>
 

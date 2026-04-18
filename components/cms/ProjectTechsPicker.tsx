@@ -1,19 +1,17 @@
 'use client';
 
 import * as React from 'react';
-import { buttonVariants } from '@/components/ui/button';
+import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
-import { Badge } from '@/components/ui/badge';
 import { ScrollArea } from '@/components/ui/scroll-area';
-import {
-  DropdownMenu,
-  DropdownMenuContent,
-  DropdownMenuTrigger,
-} from '@/components/ui/dropdown-menu';
-import { ChevronDown, X } from 'lucide-react';
+import { Check, Loader2, X } from 'lucide-react';
 import type { EntryLink } from '@/components/cms/EntryReferenceMultiSelect';
 import { readLocalizedField } from '@/lib/contentful/readLocalizedField';
 import { dedupeEntryLinks } from '@/lib/utils/dedupeEntryLinks';
+import { useContentfulStore } from '@/lib/store/contentfulStore';
+import { ensureContentfulModelLoaded } from '@/lib/store/ensureContentfulModelLoaded';
+import { contentfulService } from '@/services/contentfulService';
+import { cn } from '@/lib/utils';
 
 function toLink(id: string): EntryLink {
   return { sys: { type: 'Link', linkType: 'Entry', id } };
@@ -27,25 +25,30 @@ function readTechName(entry: any, locale: string): string {
   return entry?.sys?.id ?? '';
 }
 
-async function fetchTechEntries(managementApiRoot: string, limit: number) {
-  const q = new URLSearchParams({ contentType: 'tech', limit: String(limit), skip: '0' });
-  const res = await fetch(`${managementApiRoot}/entries?${q}`, { cache: 'no-store' });
-  const data = (await res.json()) as any;
-  if (!res.ok) throw new Error(data?.error || 'Failed to load tech entries');
-  return (data.items || []) as any[];
+function slugifyTitle(title: string): string {
+  return title
+    .toLowerCase()
+    .trim()
+    .replace(/\s+/g, '-')
+    .replace(/[^\w-]+/g, '');
 }
 
+/** Inline add row: compact width aligned with standard form controls (e.g. slug/title inputs). */
+const ADD_INPUT_MAX_CLASS = 'w-full max-w-[240px]';
+
 export function ProjectTechsPicker(props: {
+  /** Field label row (left side); add-tech input renders on the right */
+  heading: React.ReactNode;
   value: EntryLink[];
   onChange: (next: EntryLink[]) => void;
   managementApiRoot?: string;
   entryLocale: string;
 }) {
-  const { value, onChange, managementApiRoot = '/api/contentful', entryLocale } = props;
-  const [open, setOpen] = React.useState(false);
-  const [candidates, setCandidates] = React.useState<any[]>([]);
+  const { heading, value, onChange, managementApiRoot = '/api/contentful', entryLocale } = props;
   const [loadError, setLoadError] = React.useState<string | null>(null);
-  const [query, setQuery] = React.useState('');
+  const [quickAddError, setQuickAddError] = React.useState<string | null>(null);
+  const [addInput, setAddInput] = React.useState('');
+  const [creating, setCreating] = React.useState(false);
 
   const normalizedValue = React.useMemo(() => dedupeEntryLinks(value), [value]);
 
@@ -56,42 +59,50 @@ export function ProjectTechsPicker(props: {
     [onChange],
   );
 
+  const techRecord = useContentfulStore((s) => s.techs);
+  const techLoaded = useContentfulStore((s) => s.loadedModels.tech);
+  const candidates = React.useMemo(() => Object.values(techRecord) as any[], [techRecord]);
+
+  const knownTechIds = React.useMemo(() => new Set(Object.keys(techRecord)), [techRecord]);
+
+  /** Stale links (e.g. deleted tech entries) break publish with CMA `notResolvable` on `fields.techs`. */
+  const [orphanTechsNote, setOrphanTechsNote] = React.useState<string | null>(null);
+
+  React.useEffect(() => {
+    if (!techLoaded) return;
+    /** Without any tech in the catalog we cannot tell orphans from "not loaded yet". */
+    if (knownTechIds.size === 0) return;
+    const kept = normalizedValue.filter((l) => knownTechIds.has(l.sys.id));
+    if (kept.length === normalizedValue.length) return;
+    const removed = normalizedValue.length - kept.length;
+    setOrphanTechsNote(
+      removed === 1
+        ? 'Se quitó 1 tech que ya no existe en este espacio (enlace roto en Contentful). Guarda para persistir.'
+        : `Se quitaron ${removed} techs que ya no existen en este espacio. Guarda para persistir.`,
+    );
+    safeOnChange(kept);
+  }, [techLoaded, knownTechIds, normalizedValue, safeOnChange]);
+
   React.useEffect(() => {
     let cancelled = false;
-    (async () => {
-      try {
-        const items = await fetchTechEntries(managementApiRoot, 500);
-        if (!cancelled) {
-          setCandidates(items);
-          setLoadError(null);
-        }
-      } catch (e) {
-        if (!cancelled) setLoadError(e instanceof Error ? e.message : 'Error');
-      }
-    })();
+    if (techLoaded) return;
+    void ensureContentfulModelLoaded('tech').catch((e) => {
+      if (!cancelled) setLoadError(e instanceof Error ? e.message : 'Error');
+    });
     return () => {
       cancelled = true;
     };
-  }, [managementApiRoot]);
+  }, [techLoaded]);
 
   const selectedIds = React.useMemo(() => new Set(normalizedValue.map((l) => l.sys.id)), [normalizedValue]);
 
-  const labelById = React.useMemo(() => {
-    const m: Record<string, string> = {};
-    for (const e of candidates) {
-      m[e.sys.id] = readTechName(e, entryLocale);
-    }
-    return m;
+  const sortedCandidates = React.useMemo(() => {
+    return [...candidates].sort((a, b) =>
+      readTechName(a, entryLocale).localeCompare(readTechName(b, entryLocale), undefined, {
+        sensitivity: 'base',
+      }),
+    );
   }, [candidates, entryLocale]);
-
-  const filtered = React.useMemo(() => {
-    const q = query.trim().toLowerCase();
-    if (!q) return candidates;
-    return candidates.filter((e) => {
-      const lab = readTechName(e, entryLocale).toLowerCase();
-      return lab.includes(q) || e.sys.id.toLowerCase().includes(q);
-    });
-  }, [candidates, entryLocale, query]);
 
   const toggle = React.useCallback(
     (id: string) => {
@@ -102,85 +113,184 @@ export function ProjectTechsPicker(props: {
     [normalizedValue, safeOnChange],
   );
 
-  const remove = React.useCallback(
-    (id: string) => {
-      safeOnChange(normalizedValue.filter((l) => l.sys.id !== id));
+  const findTechByTypedName = React.useCallback(
+    (raw: string) => {
+      const q = raw.trim().toLowerCase();
+      if (!q) return undefined;
+      return sortedCandidates.find((e) => readTechName(e, entryLocale).trim().toLowerCase() === q);
     },
-    [normalizedValue, safeOnChange],
+    [sortedCandidates, entryLocale],
   );
 
+  const createTechQuick = React.useCallback(
+    async (nameRaw: string) => {
+      const name = nameRaw.trim();
+      const slug = slugifyTitle(name);
+      if (!name || !slug) throw new Error('Nombre inválido');
+
+      const space = contentfulService.inferSpaceFromManagementApiRoot(managementApiRoot);
+      const created = await contentfulService.createEntry({
+        space,
+        contentTypeId: 'tech',
+        fields: { name, slug },
+      });
+      const id = String(created?.sys?.id ?? '');
+      if (!id) throw new Error('Missing tech id');
+      await contentfulService.publishEntry({ space, entryId: id });
+
+      useContentfulStore.getState().upsertTech({
+        sys: {
+          id,
+          contentType: { sys: { id: 'tech' } },
+          updatedAt: new Date().toISOString(),
+          publishedAt: new Date().toISOString(),
+        },
+        fields: {
+          name: { [entryLocale]: name },
+          slug: { [entryLocale]: slug },
+          order: { [entryLocale]: undefined },
+        },
+      } as any);
+
+      return id;
+    },
+    [managementApiRoot, entryLocale],
+  );
+
+  const hasAddText = Boolean(addInput.trim());
+  const canSubmitAdd = hasAddText && !creating;
+
+  const commitAddInput = React.useCallback(async () => {
+    const q = addInput.trim();
+    if (!q || creating) return;
+
+    const found = findTechByTypedName(q);
+    if (found) {
+      const id = found.sys.id as string;
+      if (!selectedIds.has(id)) safeOnChange([...normalizedValue, toLink(id)]);
+      setAddInput('');
+      setQuickAddError(null);
+      return;
+    }
+
+    setCreating(true);
+    setQuickAddError(null);
+    try {
+      const id = await createTechQuick(q);
+      safeOnChange([...normalizedValue, toLink(id)]);
+      setAddInput('');
+    } catch (e) {
+      setQuickAddError(e instanceof Error ? e.message : 'No se pudo crear el tech');
+    } finally {
+      setCreating(false);
+    }
+  }, [
+    addInput,
+    creating,
+    createTechQuick,
+    findTechByTypedName,
+    normalizedValue,
+    safeOnChange,
+    selectedIds,
+  ]);
+
+  const clearInput = React.useCallback(() => {
+    setAddInput('');
+    setQuickAddError(null);
+  }, []);
+
   return (
-    <div className="grid gap-2">
-      <div className="flex min-h-9 flex-wrap gap-2">
-        {normalizedValue.length === 0 ? (
-          <span className="text-xs text-zinc-500">Sin tecnologías seleccionadas.</span>
-        ) : (
-          normalizedValue.map((l, idx) => (
-            <Badge key={`${l.sys.id}-${idx}`} variant="secondary" className="gap-1 pr-1 font-normal">
-              <span className="max-w-[220px] truncate">{labelById[l.sys.id] || l.sys.id}</span>
-              <button
-                type="button"
-                className="rounded p-0.5 text-zinc-600 hover:bg-zinc-200 hover:text-zinc-900"
-                aria-label={`Quitar ${labelById[l.sys.id] || l.sys.id}`}
-                onClick={() => remove(l.sys.id)}
-              >
-                <X className="h-3.5 w-3.5" />
-              </button>
-            </Badge>
-          ))
-        )}
+    <div className="grid gap-4">
+      {orphanTechsNote ? (
+        <p className="rounded-md border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-950">
+          {orphanTechsNote}
+        </p>
+      ) : null}
+      <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+        <div className="min-w-0 shrink">{heading}</div>
+        <div className="flex shrink-0 flex-col items-end gap-1">
+          <div className="flex flex-nowrap items-center justify-end gap-2">
+            <div className={cn('relative shrink-0', ADD_INPUT_MAX_CLASS)}>
+              <Input
+                value={addInput}
+                onChange={(e) => {
+                  setAddInput(e.target.value);
+                  if (quickAddError) setQuickAddError(null);
+                }}
+                onKeyDown={(e) => {
+                  if (e.key === 'Enter') {
+                    e.preventDefault();
+                    if (canSubmitAdd) void commitAddInput();
+                  }
+                }}
+                placeholder="Add tech"
+                disabled={creating}
+                className={cn('h-9', addInput.length > 0 ? 'pr-9' : 'pr-3')}
+                aria-label="Add tech"
+              />
+              {addInput.length > 0 ? (
+                <button
+                  type="button"
+                  className="absolute right-1 top-1/2 flex h-7 w-7 -translate-y-1/2 items-center justify-center rounded-md text-zinc-500 hover:bg-zinc-100 hover:text-zinc-900"
+                  aria-label="Clear"
+                  onClick={clearInput}
+                  disabled={creating}
+                >
+                  <X className="h-4 w-4" />
+                </button>
+              ) : null}
+            </div>
+            <Button
+              type="button"
+              variant="outline"
+              size="icon"
+              className="h-9 w-9 shrink-0"
+              aria-label="Add tech to selection"
+              disabled={!canSubmitAdd}
+              onClick={() => void commitAddInput()}
+            >
+              {creating ? <Loader2 className="h-4 w-4 animate-spin" /> : <Check className="h-4 w-4" />}
+            </Button>
+          </div>
+          {quickAddError ? <p className="max-w-[min(100%,320px)] text-right text-xs text-red-600">{quickAddError}</p> : null}
+        </div>
       </div>
 
-      <DropdownMenu open={open} onOpenChange={setOpen}>
-        <DropdownMenuTrigger
-          type="button"
-          className={buttonVariants({ variant: 'outline', size: 'sm', className: 'w-fit gap-2' })}
-        >
-          Seleccionar techs
-          <ChevronDown className="h-4 w-4 opacity-70" />
-        </DropdownMenuTrigger>
-        <DropdownMenuContent className="w-80 p-4" align="start">
-          <div className="flex flex-col gap-2">
-            <Input
-              value={query}
-              onChange={(e) => setQuery(e.target.value)}
-              placeholder="Buscar techs…"
-              className="h-8"
-              onKeyDown={(e) => e.stopPropagation()}
-            />
-            {loadError ? <p className="text-xs text-red-600">{loadError}</p> : null}
-            <ScrollArea className="h-48 border border-neutral-200">
-              <div className="p-1">
-                {filtered.length === 0 ? (
-                  <p className="px-4 py-6 text-center text-xs text-zinc-500">No hay coincidencias.</p>
-                ) : (
-                  filtered.map((e) => {
-                    const id = e.sys.id as string;
-                    const active = selectedIds.has(id);
-                    const lab = readTechName(e, entryLocale);
-                    return (
-                      <button
-                        key={id}
-                        type="button"
-                        onClick={() => {
-                          toggle(id);
-                        }}
-                        className={[
-                          'flex w-full items-center justify-between gap-2 rounded-md px-4 py-4 text-left text-sm transition',
-                          active ? 'bg-zinc-900 text-white' : 'text-zinc-800 hover:bg-zinc-100',
-                        ].join(' ')}
-                      >
-                        <span className="min-w-0 flex-1 truncate font-medium">{lab || id}</span>
-                        <span className="shrink-0 font-mono text-[10px] opacity-70">{active ? '✓' : '+'}</span>
-                      </button>
-                    );
-                  })
-                )}
-              </div>
-            </ScrollArea>
+      <div className="grid gap-2">
+        <p className="text-xs font-medium text-neutral-600">Techs disponibles</p>
+        {loadError ? <p className="text-xs text-red-600">{loadError}</p> : null}
+        <ScrollArea className="max-h-56 rounded-md border border-neutral-200">
+          <div className="flex flex-wrap gap-2 p-3">
+            {!techLoaded ? (
+              <p className="w-full py-6 text-center text-xs text-zinc-500">Cargando techs…</p>
+            ) : sortedCandidates.length === 0 ? (
+              <p className="w-full py-6 text-center text-xs text-zinc-500">No hay techs en el espacio.</p>
+            ) : (
+              sortedCandidates.map((e) => {
+                const id = e.sys.id as string;
+                const selected = selectedIds.has(id);
+                const lab = readTechName(e, entryLocale);
+                return (
+                  <button
+                    key={id}
+                    type="button"
+                    aria-pressed={selected}
+                    onClick={() => toggle(id)}
+                    className={cn(
+                      'rounded-full border px-3 py-1.5 text-left text-xs font-medium transition-colors',
+                      selected
+                        ? 'border-zinc-900 bg-zinc-900 text-white hover:bg-zinc-800'
+                        : 'border-neutral-200 bg-white text-neutral-800 hover:bg-neutral-50',
+                    )}
+                  >
+                    <span className="max-w-[220px] truncate">{lab || id}</span>
+                  </button>
+                );
+              })
+            )}
           </div>
-        </DropdownMenuContent>
-      </DropdownMenu>
+        </ScrollArea>
+      </div>
     </div>
   );
 }

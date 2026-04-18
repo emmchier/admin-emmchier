@@ -1,4 +1,5 @@
 import { jsonError, jsonOk, getHubCtx } from '../../_shared';
+import { logCMAOperation } from '@/lib/contentful/logCmaOperation';
 
 export async function GET(_req: Request, ctx: { params: Promise<{ id: string }> }) {
   try {
@@ -19,6 +20,7 @@ export async function PUT(req: Request, ctx: { params: Promise<{ id: string }> }
     if (!body?.fields) return jsonError(new Error('Missing fields'), 400);
 
     const existing = await client.entry.get({ spaceId, environmentId, entryId });
+    const contentTypeId = existing?.sys?.contentType?.sys?.id ? String(existing.sys.contentType.sys.id) : null;
     const mergedFields = { ...(existing.fields ?? {}) } as Record<string, any>;
 
     for (const [k, v] of Object.entries(body.fields)) {
@@ -30,8 +32,17 @@ export async function PUT(req: Request, ctx: { params: Promise<{ id: string }> }
       { ...existing, fields: mergedFields },
     );
 
+    logCMAOperation({
+      action: 'UPDATE',
+      contentType: contentTypeId,
+      entryId,
+      payload: { fields: body.fields },
+      response: { sys: updated?.sys },
+    });
     return jsonOk({ item: updated });
   } catch (e) {
+    const { id } = await ctx.params.catch(() => ({ id: '' as any }));
+    logCMAOperation({ action: 'UPDATE', entryId: id ? String(id) : null, error: e });
     return jsonError(e, 500);
   }
 }
@@ -41,8 +52,11 @@ export async function DELETE(_req: Request, ctx: { params: Promise<{ id: string 
     const { client, spaceId, environmentId } = getHubCtx();
     const { id: entryId } = await ctx.params;
     await client.entry.delete({ spaceId, environmentId, entryId });
+    logCMAOperation({ action: 'DELETE', entryId, response: { ok: true } });
     return jsonOk({ ok: true });
   } catch (e) {
+    const { id } = await ctx.params.catch(() => ({ id: '' as any }));
+    logCMAOperation({ action: 'DELETE', entryId: id ? String(id) : null, error: e });
     return jsonError(e, 500);
   }
 }

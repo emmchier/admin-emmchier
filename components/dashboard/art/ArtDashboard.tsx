@@ -9,17 +9,29 @@ import { upsertEntryFromManagementApi } from '@/lib/store/syncEntryFromManagemen
 export type ArtMode = 'list' | 'create' | 'edit';
 
 export type ArtActions = {
-  createEntryAction: (args: { contentTypeId: string; fields: Record<string, any> }) => Promise<{ id: string }>;
-  updateEntryAction: (args: { entryId: string; fields: Record<string, any> }) => Promise<{ ok: boolean }>;
+  createEntryAction: (args: {
+    contentTypeId: string;
+    fields: Record<string, any>;
+  }) => Promise<{ id: string }>;
+  updateEntryAction: (args: {
+    entryId: string;
+    fields: Record<string, any>;
+  }) => Promise<{ ok: boolean }>;
   deleteEntryAction: (entryId: string) => Promise<{ ok: boolean }>;
   publishEntryAction: (entryId: string) => Promise<{ ok: boolean }>;
   unpublishEntryAction: (entryId: string) => Promise<{ ok: boolean }>;
 };
 
-export function ArtDashboard(props: { entryLocale: string; contentfulSpaceId: string; actions: ArtActions }) {
+export function ArtDashboard(props: {
+  entryLocale: string;
+  contentfulSpaceId: string;
+  actions: ArtActions;
+}) {
   const { entryLocale, contentfulSpaceId, actions } = props;
   const [mode, setMode] = React.useState<ArtMode>('list');
-  const [selectedEntryId, setSelectedEntryId] = React.useState<string | null>(null);
+  const [selectedEntryId, setSelectedEntryId] = React.useState<string | null>(
+    null
+  );
 
   const goList = React.useCallback(() => {
     setMode('list');
@@ -43,16 +55,16 @@ export function ArtDashboard(props: { entryLocale: string; contentfulSpaceId: st
 
   const editorLabels = React.useMemo(
     () => ({
-      createSubtitle: 'Nuevo proyecto',
-      createEmptyTitle: 'Nuevo proyecto',
-      editEmptyTitle: 'Proyecto',
-      publishToast: 'Proyecto publicado',
-      unpublishToast: 'Proyecto oculto',
-      deleteDialogTitle: 'Eliminar proyecto',
+      createSubtitle: 'New Project',
+      createEmptyTitle: 'New Project',
+      editEmptyTitle: 'Project',
+      publishToast: 'Project published',
+      unpublishToast: 'Project unpublished',
+      deleteDialogTitle: 'Delete project',
       deleteDialogDescription: (liveTitle: string) =>
-        `¿Estás seguro que querés eliminar el proyecto '${liveTitle}'?`,
+        `Are you sure you want to delete the project '${liveTitle}'?`,
     }),
-    [],
+    []
   );
 
   return (
@@ -93,4 +105,3 @@ export function ArtDashboard(props: { entryLocale: string; contentfulSpaceId: st
     </div>
   );
 }
-

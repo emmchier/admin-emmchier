@@ -3,9 +3,9 @@
 import * as React from 'react';
 import { ChevronRight } from 'lucide-react';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
-import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
+import { StatusBadge } from '@/components/ui/status-badge';
 import {
   Pagination,
   PaginationContent,
@@ -17,9 +17,7 @@ import {
 } from '@/components/ui/pagination';
 import type { ContentfulModelName, ContentfulStore } from '@/lib/store/contentfulStore';
 import { useContentfulStore } from '@/lib/store/contentfulStore';
-import { ensureContentfulModelLoaded } from '@/lib/store/ensureContentfulModelLoaded';
 import { readLocalizedField } from '@/lib/contentful/readLocalizedField';
-import { isEntryPublished } from '@/lib/contentful/isEntryPublished';
 
 const PAGE_SIZE = 10;
 
@@ -88,26 +86,6 @@ export type EntryListProps = {
   onEdit: (entryId: string) => void;
 };
 
-async function fetchEntriesRemote(
-  managementApiRoot: string,
-  contentTypeId: string,
-  limit: number,
-  skip: number,
-  query?: string,
-): Promise<{ items: any[]; total: number }> {
-  const q = new URLSearchParams({
-    contentType: contentTypeId,
-    limit: String(limit),
-    skip: String(skip),
-  });
-  if (query?.trim()) q.set('q', query.trim());
-  const res = await fetch(`${managementApiRoot}/entries?${q.toString()}`, { method: 'GET', cache: 'no-store' });
-  const data = (await res.json()) as any;
-  if (!res.ok) throw new Error(data?.error || 'Failed to load entries');
-  const total = typeof data.total === 'number' ? data.total : (data.items?.length ?? 0);
-  return { items: data.items || [], total };
-}
-
 export function EntryList(props: EntryListProps) {
   const {
     contentTypeId,
@@ -115,7 +93,7 @@ export function EntryList(props: EntryListProps) {
     managementApiRoot = '/api/contentful',
     cacheModel,
     entityPluralLabel,
-    searchPlaceholder = 'Buscar…',
+    searchPlaceholder = 'Search…',
     primaryFieldId = 'title',
     newLabel,
     refreshLabel = 'Refresh',
@@ -129,10 +107,7 @@ export function EntryList(props: EntryListProps) {
   const record = useContentfulStore(cacheModel ? recordSelector(cacheModel) : () => EMPTY_RECORD);
   const modelLoaded = useContentfulStore((s) => (cacheModel ? s.loadedModels[cacheModel] : true));
 
-  const [remoteItems, setRemoteItems] = React.useState<any[]>([]);
-  const [remoteTotal, setRemoteTotal] = React.useState(0);
   const [error, setError] = React.useState<string | null>(null);
-  const [busy, setBusy] = React.useState(false);
   const [page, setPage] = React.useState(1);
   const [searchInput, setSearchInput] = React.useState('');
   const [debouncedSearch, setDebouncedSearch] = React.useState('');
@@ -148,26 +123,8 @@ export function EntryList(props: EntryListProps) {
     return () => window.clearTimeout(t);
   }, [searchInput]);
 
-  const loadRemote = React.useCallback(async () => {
-    if (cacheModel) return;
-    setBusy(true);
-    setError(null);
-    try {
-      const skip = (page - 1) * PAGE_SIZE;
-      const data = await fetchEntriesRemote(managementApiRoot, contentTypeId, PAGE_SIZE, skip, debouncedSearch);
-      setRemoteItems(data.items || []);
-      setRemoteTotal(data.total);
-    } catch (e) {
-      setError(e instanceof Error ? e.message : 'Failed to load entries');
-    } finally {
-      setBusy(false);
-    }
-  }, [cacheModel, contentTypeId, managementApiRoot, page, debouncedSearch]);
-
-  React.useEffect(() => {
-    if (cacheModel) return;
-    void loadRemote();
-  }, [cacheModel, loadRemote]);
+  // IMPORTANT: This component never triggers model loading on mount.
+  // The dashboard layer must call `contentfulService` on navigation/mutations.
 
   const cacheAllSorted = React.useMemo(() => {
     if (!cacheModel) return [];
@@ -187,12 +144,12 @@ export function EntryList(props: EntryListProps) {
   }, [cacheModel, cacheAllSorted, debouncedSearch, entryLocale, primaryFieldId]);
 
   const items = React.useMemo(() => {
-    if (!cacheModel) return remoteItems;
+    const data = cacheModel ? cacheFiltered : [];
     const skip = (page - 1) * PAGE_SIZE;
-    return cacheFiltered.slice(skip, skip + PAGE_SIZE);
-  }, [cacheModel, cacheFiltered, page, remoteItems]);
+    return data.slice(skip, skip + PAGE_SIZE);
+  }, [cacheFiltered, cacheModel, page]);
 
-  const total = cacheModel ? cacheFiltered.length : remoteTotal;
+  const total = cacheModel ? cacheFiltered.length : 0;
 
   // Refresh is global (header). Lists are cache-first + on-demand only.
 
@@ -231,7 +188,7 @@ export function EntryList(props: EntryListProps) {
                 onChange={(e) => setSearchInput(e.target.value)}
                 placeholder={searchPlaceholder}
                 className="mb-4 max-w-sm min-w-48"
-                aria-label="Filtrar entradas"
+                aria-label="Filter entries"
               />
               {showPagination ? (
                 <Pagination className="mx-0 w-auto justify-end">
@@ -239,7 +196,7 @@ export function EntryList(props: EntryListProps) {
                     <PaginationItem>
                       <PaginationPrevious
                         href="#"
-                        text="Anterior"
+                        text="Previous"
                         className={page <= 1 ? 'pointer-events-none opacity-40' : ''}
                         onClick={(e) => {
                           e.preventDefault();
@@ -272,7 +229,7 @@ export function EntryList(props: EntryListProps) {
                     <PaginationItem>
                       <PaginationNext
                         href="#"
-                        text="Siguiente"
+                        text="Next"
                         className={page >= totalPages ? 'pointer-events-none opacity-40' : ''}
                         onClick={(e) => {
                           e.preventDefault();
@@ -286,7 +243,8 @@ export function EntryList(props: EntryListProps) {
             </div>
           </div>
 
-          <div className="mt-0 min-h-0 flex-1 overflow-auto px-4 pb-[72px] pt-0">
+          <div className="mt-0 min-h-0 flex-1 overflow-auto pb-[72px] pt-0">
+            <div className="px-4">
             {error ? (
               <p className="mb-4 border border-red-200 bg-red-50 px-4 py-4 text-sm text-red-700">{error}</p>
             ) : null}
@@ -299,7 +257,7 @@ export function EntryList(props: EntryListProps) {
                     <TableHead className="h-auto text-left text-neutral-700">Status</TableHead>
                     <TableHead className="h-auto text-left text-neutral-700">Updated</TableHead>
                     <TableHead className="h-auto w-12 min-w-12 px-4 text-left text-neutral-700">
-                      <span className="sr-only">Abrir detalle</span>
+                      <span className="sr-only">Open details</span>
                     </TableHead>
                   </TableRow>
                 </TableHeader>
@@ -326,25 +284,11 @@ export function EntryList(props: EntryListProps) {
                               onEdit(e.sys.id);
                             }
                           }}
-                          aria-label={`Editar: ${primary || 'entrada'}`}
+                          aria-label={`Edit: ${primary || 'entry'}`}
                         >
                           <TableCell className="text-left font-medium">{primary}</TableCell>
                           <TableCell className="text-left">
-                            {isEntryPublished(e.sys) ? (
-                              <Badge
-                                variant="default"
-                                className="border-transparent bg-emerald-600 text-white hover:bg-emerald-600 dark:bg-emerald-600 dark:text-white dark:hover:bg-emerald-600"
-                              >
-                                {statusPublishedLabel}
-                              </Badge>
-                            ) : (
-                              <Badge
-                                variant="secondary"
-                                className="border-amber-200 bg-amber-100 text-amber-950 hover:bg-amber-100 dark:border-amber-800 dark:bg-amber-950/60 dark:text-amber-50 dark:hover:bg-amber-950/60"
-                              >
-                                {statusDraftLabel}
-                              </Badge>
-                            )}
+                            <StatusBadge entry={e} />
                           </TableCell>
                           <TableCell className="text-left text-sm text-neutral-600">
                             {new Date(e.sys.updatedAt).toLocaleString()}
@@ -357,6 +301,7 @@ export function EntryList(props: EntryListProps) {
                     })}
                 </TableBody>
               </Table>
+            </div>
             </div>
           </div>
         </div>

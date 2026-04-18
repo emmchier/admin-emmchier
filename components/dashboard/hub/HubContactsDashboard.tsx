@@ -12,6 +12,7 @@ import { HubCachedEntryList } from '@/components/dashboard/hub/HubCachedEntryLis
 import { ensureHubModelLoaded } from '@/lib/store/ensureHubModelLoaded';
 import { useHubStore } from '@/lib/store/hubStore';
 import { HubSocialNetworkDetail } from '@/components/dashboard/hub/HubSocialNetworkDetail';
+import { contentfulService } from '@/services/contentfulService';
 
 const HUB_MANAGEMENT_API = '/api/contentful/hub';
 
@@ -28,19 +29,12 @@ function readLinks(raw: unknown): EntryLink[] {
 }
 
 async function fetchFirstContactEntry(): Promise<any | null> {
-  const q = new URLSearchParams({ contentType: 'contact', limit: '1', skip: '0' });
-  const res = await fetch(`${HUB_MANAGEMENT_API}/entries?${q.toString()}`, { cache: 'no-store' });
-  const data = (await res.json()) as any;
-  if (!res.ok) throw new Error(data?.error || 'Failed to load contact');
-  const first = data?.items?.[0];
-  return first ?? null;
+  const items = await contentfulService.getEntriesCached({ space: 'hub', contentTypeId: 'contact' });
+  return (items?.[0] as any) ?? null;
 }
 
 async function fetchEntry(entryId: string): Promise<any> {
-  const res = await fetch(`${HUB_MANAGEMENT_API}/entries/${encodeURIComponent(entryId)}`, { cache: 'no-store' });
-  const data = (await res.json()) as any;
-  if (!res.ok) throw new Error(data?.error || 'Failed to load entry');
-  return data?.item;
+  return await contentfulService.getEntryById({ space: 'hub', entryId });
 }
 
 export function HubContactsDashboard(props: {
@@ -181,7 +175,8 @@ export function HubContactsDashboard(props: {
             </div>
           </div>
 
-          <div className="min-h-0 w-fit overflow-auto px-4 pb-[72px] pt-4">
+          <div className="min-h-0 w-fit overflow-auto pb-[72px] pt-4">
+            <div className="px-4">
             {loadingContact ? (
               <p className="flex items-center gap-2 text-sm text-neutral-500">
                 <Loader2 className="h-4 w-4 animate-spin" /> Loading…
@@ -189,6 +184,7 @@ export function HubContactsDashboard(props: {
             ) : (
               <div />
             )}
+            </div>
           </div>
         </section>
 

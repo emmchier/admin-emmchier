@@ -5,6 +5,7 @@ import type { SpaceId } from '@/lib/spaces';
 import type { DashboardHeaderTabs } from '@/lib/dashboard-header-tabs';
 import { Tabs, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { Button } from '@/components/ui/button';
+import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '@/components/ui/tooltip';
 
 const VISIT: Record<SpaceId, { href: string; host: string }> = {
   art: { href: 'https://art.emmchier.com', host: 'art.emmchier.com' },
@@ -64,7 +65,7 @@ export function SpaceVisitHeader({ activeSpace, contentfulSpaceId, headerTabs, o
   );
 
   return (
-    <header className="flex h-14 w-full items-stretch justify-between gap-x-4 border-b border-neutral-200 px-4 py-0">
+    <header className="sticky top-0 z-40 flex h-14 w-full shrink-0 items-stretch justify-between gap-x-4 border-b border-neutral-200 bg-white px-4 py-0">
       <div className="flex min-w-0 flex-1 items-stretch">
         {headerTabs ? (
           <Tabs
@@ -100,10 +101,17 @@ export function SpaceVisitHeader({ activeSpace, contentfulSpaceId, headerTabs, o
 
       <div className="flex shrink-0 items-center gap-x-4">
         {onRefresh ? (
-          <Button type="button" variant="outline" size="icon" onClick={onRefresh} disabled={Boolean(refreshing)}>
-            {refreshing ? <Loader2 className="h-4 w-4 animate-spin" /> : <RefreshCw className="h-4 w-4" />}
-            <span className="sr-only">Refresh</span>
-          </Button>
+          <TooltipProvider>
+            <Tooltip>
+              <TooltipTrigger asChild>
+                <Button type="button" variant="outline" size="icon" onClick={onRefresh} disabled={Boolean(refreshing)}>
+                  {refreshing ? <Loader2 className="h-4 w-4 animate-spin" /> : <RefreshCw className="h-4 w-4" />}
+                  <span className="sr-only">Refresh</span>
+                </Button>
+              </TooltipTrigger>
+              <TooltipContent>Refresh</TooltipContent>
+            </Tooltip>
+          </TooltipProvider>
         ) : null}
         {contentfulBlock}
         {visitLink}
