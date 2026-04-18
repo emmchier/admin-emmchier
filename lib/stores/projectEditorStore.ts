@@ -1,4 +1,9 @@
+'use client';
+
 import { create } from 'zustand';
+import { coerceRichTextDocument } from '@/lib/contentful/coerceRichTextDocument';
+import { emptyContentfulDocument } from '@/lib/contentful/contentfulTiptapBridge';
+import { htmlStringToContentfulDocument } from '@/lib/contentful/htmlToContentfulRichText';
 
 type JsonPrimitive = string | number | boolean | null;
 type JsonValue = JsonPrimitive | JsonValue[] | { [k: string]: JsonValue };
@@ -31,6 +36,43 @@ function stableStringify(value: unknown): string {
   return JSON.stringify(sort(value));
 }
 
+/** Compare Rich Text as Contentful JSON so session HTML matches reloaded Document after undo. */
+function canonicalMakingOfSnapshot(value: JsonValue | undefined): string {
+  if (value === undefined || value === null) {
+    return stableStringify(emptyContentfulDocument());
+  }
+  if (typeof value === 'string') {
+    try {
+      return stableStringify(htmlStringToContentfulDocument(value));
+    } catch {
+      return stableStringify(value);
+    }
+  }
+  const doc = coerceRichTextDocument(value as unknown);
+  if (doc) return stableStringify(doc);
+  return stableStringify(value);
+}
+
+function computeDirty(
+  original: Record<string, JsonValue> | null,
+  next: Record<string, JsonValue>,
+): boolean {
+  if (!original) return Object.keys(next).length > 0;
+  const keys = new Set([...Object.keys(original), ...Object.keys(next)]);
+  for (const key of keys) {
+    if (key === 'makingOf') {
+      if (canonicalMakingOfSnapshot(original[key]) !== canonicalMakingOfSnapshot(next[key])) {
+        return true;
+      }
+      continue;
+    }
+    if (stableStringify(original[key]) !== stableStringify(next[key])) {
+      return true;
+    }
+  }
+  return false;
+}
+
 function slugifyTitle(title: string): string {
   return title
     .toLowerCase()
@@ -56,8 +98,7 @@ export const useProjectEditorStore = create<State & Actions>((set, get) => ({
   setField: (id, value) =>
     set((state) => {
       const next = { ...(state.currentData ?? {}), [id]: value } as Record<string, JsonValue>;
-      const isDirty =
-        stableStringify(state.originalData ?? {}) !== stableStringify(next);
+      const isDirty = computeDirty(state.originalData, next);
       return { currentData: next, isDirty };
     }),
 
@@ -75,8 +116,7 @@ export const useProjectEditorStore = create<State & Actions>((set, get) => ({
             : '';
       const slug = slugifyTitle(title);
       const next = { ...current, slug } as Record<string, JsonValue>;
-      const isDirty =
-        stableStringify(state.originalData ?? {}) !== stableStringify(next);
+      const isDirty = computeDirty(state.originalData, next);
       return { currentData: next, isDirty };
     }),
 }));

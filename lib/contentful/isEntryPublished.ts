@@ -5,9 +5,7 @@
 export function isEntryPublished(sys: unknown): boolean {
   if (!sys || typeof sys !== 'object') return false;
   const s = sys as Record<string, unknown>;
-  if (typeof s.publishedAt === 'string' && s.publishedAt.length > 0) return true;
-  if (typeof s.firstPublishedAt === 'string' && s.firstPublishedAt.length > 0) return true;
-  if (typeof s.publishedCounter === 'number' && s.publishedCounter > 0) return true;
-  if (typeof s.publishedVersion === 'number' && s.publishedVersion > 0) return true;
-  return false;
+  // `publishedAt` exists ONLY when the entry is currently published.
+  // `firstPublishedAt/publishedVersion/publishedCounter` may exist even after unpublishing.
+  return typeof s.publishedAt === 'string' && s.publishedAt.length > 0;
 }

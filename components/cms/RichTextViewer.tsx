@@ -4,6 +4,8 @@ import * as React from 'react';
 import type { Document, Block, Text } from '@contentful/rich-text-types';
 import { BLOCKS, INLINES, MARKS } from '@contentful/rich-text-types';
 import { documentToReactComponents, type Options } from '@contentful/rich-text-react-renderer';
+import { contentfulService } from '@/services/contentfulService';
+import { normalizeRichTextHyperlinkUri } from '@/lib/contentful/normalizeRichTextHyperlinkUri';
 
 type Props = {
   value: Document | null | undefined;
@@ -67,14 +69,11 @@ export function RichTextViewer({ value, className, managementApiRoot = '/api/con
 
     (async () => {
       try {
-        const res = await fetch(`${managementApiRoot}/assets?ids=${encodeURIComponent(list.join(','))}`, {
-          cache: 'no-store',
-        });
-        const data = (await res.json()) as any;
-        if (!res.ok) return;
+        const space = contentfulService.inferSpaceFromManagementApiRoot(managementApiRoot);
+        const items = await contentfulService.getAssetPreviews({ space, assetIds: list });
         const map: Record<string, string | null> = {};
-        for (const it of data.items || []) {
-          map[it.assetId] = it.url ?? null;
+        for (const it of items || []) {
+          map[(it as any).assetId] = (it as any).url ?? null;
         }
         if (!cancelled) setAssetUrlById(map);
       } catch {
@@ -95,7 +94,9 @@ export function RichTextViewer({ value, className, managementApiRoot = '/api/con
         [MARKS.UNDERLINE]: (text) => <u>{text}</u>,
       },
       renderNode: {
-        [BLOCKS.PARAGRAPH]: (_node, children) => <p className="my-3 leading-7">{children}</p>,
+        [BLOCKS.PARAGRAPH]: (_node, children) => (
+          <p className="my-3 whitespace-pre-line leading-7">{children}</p>
+        ),
         [BLOCKS.HEADING_1]: (_node, children) => <h1 className="my-4 text-2xl font-semibold">{children}</h1>,
         [BLOCKS.HEADING_2]: (_node, children) => <h2 className="my-4 text-xl font-semibold">{children}</h2>,
         [BLOCKS.HEADING_3]: (_node, children) => <h3 className="my-3 text-lg font-semibold">{children}</h3>,
@@ -106,7 +107,9 @@ export function RichTextViewer({ value, className, managementApiRoot = '/api/con
         [BLOCKS.LIST_ITEM]: (_node, children) => <li className="my-1">{children}</li>,
 
         [INLINES.HYPERLINK]: (node, children) => {
-          const href = typeof (node as any)?.data?.uri === 'string' ? (node as any).data.uri : '';
+          const raw =
+            typeof (node as any)?.data?.uri === 'string' ? ((node as any).data.uri as string) : '';
+          const href = raw ? normalizeRichTextHyperlinkUri(raw) : '';
           if (!href) return <span>{children}</span>;
           return (
             <a href={href} target="_blank" rel="noopener noreferrer" className="underline underline-offset-2">

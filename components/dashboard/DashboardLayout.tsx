@@ -42,7 +42,7 @@ export function DashboardLayout({
             onRefresh={onRefresh ?? undefined}
             refreshing={refreshing}
           />
-          <div className="flex min-h-0 flex-1 flex-col">{children}</div>
+          <div className="flex min-h-0 flex-1 flex-col pt-6">{children}</div>
         </main>
       </div>
     </div>

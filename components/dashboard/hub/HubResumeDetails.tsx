@@ -3,7 +3,8 @@
 import * as React from 'react';
 import { ArrowLeft, Loader2, Trash2 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
-import { Badge } from '@/components/ui/badge';
+import { StatusBadge } from '@/components/ui/status-badge';
+import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '@/components/ui/tooltip';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Separator } from '@/components/ui/separator';
@@ -85,20 +86,25 @@ function TechStoreMultiSelect(props: { value: EntryLink[]; onChange: (next: Entr
   );
 }
 
-function Header(props: { title: string; published: boolean; onBack: () => void; actions: React.ReactNode }) {
+function Header(props: { title: string; entry: any; onBack: () => void; actions: React.ReactNode }) {
   return (
     <div className="shrink-0 space-y-3 px-4 pt-0">
       <div className="flex flex-wrap items-center justify-between gap-3">
         <div className="flex min-w-0 items-center gap-2">
-          <Button type="button" variant="ghost" size="icon" onClick={props.onBack} aria-label="Back">
-            <ArrowLeft className="h-4 w-4" />
-          </Button>
+          <TooltipProvider>
+            <Tooltip>
+              <TooltipTrigger asChild>
+                <Button type="button" variant="ghost" size="icon" onClick={props.onBack} aria-label="Go back">
+                  <ArrowLeft className="h-4 w-4" />
+                </Button>
+              </TooltipTrigger>
+              <TooltipContent>Go back</TooltipContent>
+            </Tooltip>
+          </TooltipProvider>
           <div className="min-w-0">
             <h2 className="truncate text-base font-semibold text-neutral-900">{props.title}</h2>
             <div className="mt-1">
-              <Badge className={props.published ? 'bg-emerald-600 text-white hover:bg-emerald-600' : ''} variant={props.published ? 'default' : 'secondary'}>
-                {props.published ? 'Publicado' : 'Borrador'}
-              </Badge>
+              <StatusBadge entry={props.entry} />
             </div>
           </div>
         </div>
@@ -152,7 +158,7 @@ export function HubTechDetail(props: { entryId: string; entryLocale: string; act
       useHubStore.getState().remove('tech', entryId);
       onDeleted?.();
       onBack();
-      toast.success('Eliminado');
+      toast.success('Deleted');
     } finally {
       setBusy(false);
       setConfirmDeleteOpen(false);
@@ -164,13 +170,13 @@ export function HubTechDetail(props: { entryId: string; entryLocale: string; act
       <div className="col-span-12 flex min-h-0 flex-1 flex-col lg:col-start-3 lg:col-span-8">
       <Header
         title={nameEn || 'Tech'}
-        published={published}
+        entry={entry}
         onBack={onBack}
         actions={
           <>
             <Button type="button" size="sm" onClick={() => void save()} disabled={busy || !dirty}>
               {busy ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : null}
-              Guardar cambios
+              Save changes
             </Button>
             <Button type="button" variant="destructive" size="sm" onClick={() => setConfirmDeleteOpen(true)} disabled={busy}>
               {busy ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <Trash2 className="mr-2 h-4 w-4" />}
@@ -180,7 +186,8 @@ export function HubTechDetail(props: { entryId: string; entryLocale: string; act
         }
       />
 
-      <div className="min-h-0 flex-1 overflow-auto px-4 pb-[72px] pt-4">
+      <div className="min-h-0 flex-1 overflow-auto pb-[72px] pt-4">
+        <div className="px-4">
         <div className="grid gap-4 md:grid-cols-2">
           <div className="grid gap-2">
             <Label className="text-sm">Name EN</Label>
@@ -190,6 +197,7 @@ export function HubTechDetail(props: { entryId: string; entryLocale: string; act
             <Label className="text-sm">Name ES</Label>
             <Input value={nameEs} onChange={(e) => setNameEs(e.target.value)} />
           </div>
+        </div>
         </div>
       </div>
 
@@ -252,7 +260,7 @@ export function HubCourseDetail(props: { entryId: string; entryLocale: string; a
       useHubStore.getState().remove('course', entryId);
       onDeleted?.();
       onBack();
-      toast.success('Eliminado');
+      toast.success('Deleted');
     } finally {
       setBusy(false);
       setConfirmDeleteOpen(false);
@@ -264,13 +272,13 @@ export function HubCourseDetail(props: { entryId: string; entryLocale: string; a
       <div className="col-span-12 flex min-h-0 flex-1 flex-col lg:col-start-3 lg:col-span-8">
       <Header
         title={draft.titleEn || 'Course'}
-        published={published}
+        entry={entry}
         onBack={onBack}
         actions={
           <>
             <Button type="button" size="sm" onClick={() => void save()} disabled={busy || !dirty}>
               {busy ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : null}
-              Guardar cambios
+              Save changes
             </Button>
             <Button type="button" variant="destructive" size="sm" onClick={() => setConfirmDeleteOpen(true)} disabled={busy}>
               {busy ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <Trash2 className="mr-2 h-4 w-4" />}
@@ -279,7 +287,8 @@ export function HubCourseDetail(props: { entryId: string; entryLocale: string; a
           </>
         }
       />
-      <div className="min-h-0 flex-1 overflow-auto px-4 pb-[72px] pt-4">
+      <div className="min-h-0 flex-1 overflow-auto pb-[72px] pt-4">
+        <div className="px-4">
         <div className="grid gap-4 md:grid-cols-2">
           {(['companyEn','companyEs','titleEn','titleEs'] as const).map((k) => (
             <div key={k} className="grid gap-2">
@@ -298,6 +307,7 @@ export function HubCourseDetail(props: { entryId: string; entryLocale: string; a
             <Label className="text-sm">endDate</Label>
             <Input type="date" value={draft.endDate} onChange={(e) => setDraft((p) => ({ ...p, endDate: e.target.value }))} />
           </div>
+        </div>
         </div>
       </div>
 
@@ -359,7 +369,7 @@ export function HubStudyDetail(props: { entryId: string; entryLocale: string; ac
       useHubStore.getState().remove('study', entryId);
       onDeleted?.();
       onBack();
-      toast.success('Eliminado');
+      toast.success('Deleted');
     } finally {
       setBusy(false);
       setConfirmDeleteOpen(false);
@@ -371,13 +381,13 @@ export function HubStudyDetail(props: { entryId: string; entryLocale: string; ac
       <div className="col-span-12 flex min-h-0 flex-1 flex-col lg:col-start-3 lg:col-span-8">
       <Header
         title={draft.titleEn || 'Study'}
-        published={published}
+        entry={entry}
         onBack={onBack}
         actions={
           <>
             <Button type="button" size="sm" onClick={() => void save()} disabled={busy || !dirty}>
               {busy ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : null}
-              Guardar cambios
+              Save changes
             </Button>
             <Button type="button" variant="destructive" size="sm" onClick={() => setConfirmDeleteOpen(true)} disabled={busy}>
               {busy ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <Trash2 className="mr-2 h-4 w-4" />}
@@ -386,7 +396,8 @@ export function HubStudyDetail(props: { entryId: string; entryLocale: string; ac
           </>
         }
       />
-      <div className="min-h-0 flex-1 overflow-auto px-4 pb-[72px] pt-4">
+      <div className="min-h-0 flex-1 overflow-auto pb-[72px] pt-4">
+        <div className="px-4">
         <div className="grid gap-4 md:grid-cols-2">
           {(['schoolEn','schoolEs','titleEn','titleEs'] as const).map((k) => (
             <div key={k} className="grid gap-2">
@@ -405,6 +416,7 @@ export function HubStudyDetail(props: { entryId: string; entryLocale: string; ac
             <Label className="text-sm">endDate</Label>
             <Input type="date" value={draft.endDate} onChange={(e) => setDraft((p) => ({ ...p, endDate: e.target.value }))} />
           </div>
+        </div>
         </div>
       </div>
 
@@ -464,7 +476,7 @@ export function HubLanguageDetail(props: { entryId: string; entryLocale: string;
       useHubStore.getState().remove('language', entryId);
       onDeleted?.();
       onBack();
-      toast.success('Eliminado');
+      toast.success('Deleted');
     } finally {
       setBusy(false);
       setConfirmDeleteOpen(false);
@@ -476,13 +488,13 @@ export function HubLanguageDetail(props: { entryId: string; entryLocale: string;
       <div className="col-span-12 flex min-h-0 flex-1 flex-col lg:col-start-3 lg:col-span-8">
       <Header
         title={draft.nameEn || 'Language'}
-        published={published}
+        entry={entry}
         onBack={onBack}
         actions={
           <>
             <Button type="button" size="sm" onClick={() => void save()} disabled={busy || !dirty}>
               {busy ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : null}
-              Guardar cambios
+              Save changes
             </Button>
             <Button type="button" variant="destructive" size="sm" onClick={() => setConfirmDeleteOpen(true)} disabled={busy}>
               {busy ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <Trash2 className="mr-2 h-4 w-4" />}
@@ -491,7 +503,8 @@ export function HubLanguageDetail(props: { entryId: string; entryLocale: string;
           </>
         }
       />
-      <div className="min-h-0 flex-1 overflow-auto px-4 pb-[72px] pt-4">
+      <div className="min-h-0 flex-1 overflow-auto pb-[72px] pt-4">
+        <div className="px-4">
         <div className="grid gap-4 md:grid-cols-2">
           {(['nameEn','nameEs','levelEn','levelEs'] as const).map((k) => (
             <div key={k} className="grid gap-2">
@@ -499,6 +512,7 @@ export function HubLanguageDetail(props: { entryId: string; entryLocale: string;
               <Input value={(draft as any)[k]} onChange={(e) => setDraft((p) => ({ ...p, [k]: e.target.value }))} />
             </div>
           ))}
+        </div>
         </div>
       </div>
 
@@ -584,7 +598,7 @@ export function HubExperienceDetail(props: { entryId: string; entryLocale: strin
       useHubStore.getState().remove('experience', entryId);
       onDeleted?.();
       onBack();
-      toast.success('Eliminado');
+      toast.success('Deleted');
     } finally {
       setBusy(false);
       setConfirmDeleteOpen(false);
@@ -596,13 +610,13 @@ export function HubExperienceDetail(props: { entryId: string; entryLocale: strin
       <div className="col-span-12 flex min-h-0 flex-1 flex-col lg:col-start-3 lg:col-span-8">
       <Header
         title={draft.roleEn || 'Experience'}
-        published={published}
+        entry={entry}
         onBack={onBack}
         actions={
           <>
             <Button type="button" size="sm" onClick={() => void save()} disabled={busy || !dirty}>
               {busy ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : null}
-              Guardar cambios
+              Save changes
             </Button>
             <Button type="button" variant="destructive" size="sm" onClick={() => setConfirmDeleteOpen(true)} disabled={busy}>
               {busy ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <Trash2 className="mr-2 h-4 w-4" />}
@@ -611,7 +625,8 @@ export function HubExperienceDetail(props: { entryId: string; entryLocale: strin
           </>
         }
       />
-      <div className="min-h-0 flex-1 overflow-auto px-4 pb-[72px] pt-4">
+      <div className="min-h-0 flex-1 overflow-auto pb-[72px] pt-4">
+        <div className="px-4">
         <div className="grid gap-4 md:grid-cols-2">
           {(['companyEn','companyEs','roleEn','roleEs'] as const).map((k) => (
             <div key={k} className="grid gap-2">
@@ -646,6 +661,7 @@ export function HubExperienceDetail(props: { entryId: string; entryLocale: strin
         <div className="grid gap-2">
           <Label className="text-sm">Techs</Label>
           <TechStoreMultiSelect value={draft.techs} onChange={(next) => setDraft((p) => ({ ...p, techs: next }))} entryLocale={entryLocale} />
+        </div>
         </div>
       </div>
 

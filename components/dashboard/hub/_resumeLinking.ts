@@ -1,4 +1,5 @@
 import type { EntryLink } from '@/components/cms/EntryReferenceMultiSelect';
+import { contentfulService } from '@/services/contentfulService';
 
 export const HUB_MANAGEMENT_API = '/api/contentful/hub';
 
@@ -25,19 +26,13 @@ export function mergeLink(existingCell: any, newId: string): { nextLinks: EntryL
 }
 
 export async function fetchFirstResumeId(): Promise<string | null> {
-  const q = new URLSearchParams({ contentType: 'resume', limit: '1', skip: '0' });
-  const res = await fetch(`${HUB_MANAGEMENT_API}/entries?${q.toString()}`, { cache: 'no-store' });
-  const data = (await res.json()) as any;
-  if (!res.ok) throw new Error(data?.error || 'Failed to load resume');
-  const first = data?.items?.[0];
-  return typeof first?.sys?.id === 'string' ? (first.sys.id as string) : null;
+  const items = await contentfulService.getEntriesCached({ space: 'hub', contentTypeId: 'resume' });
+  const first = items?.[0] as any;
+  return typeof first?.sys?.id === 'string' ? String(first.sys.id) : null;
 }
 
 export async function fetchEntry(entryId: string): Promise<any> {
-  const res = await fetch(`${HUB_MANAGEMENT_API}/entries/${encodeURIComponent(entryId)}`, { cache: 'no-store' });
-  const data = (await res.json()) as any;
-  if (!res.ok) throw new Error(data?.error || 'Failed to load entry');
-  return data?.item;
+  return await contentfulService.getEntryById({ space: 'hub', entryId });
 }
 
 export function asDateCell(v: string): string | null {

@@ -1,4 +1,5 @@
 import { jsonError, jsonOk, getHubCtx, parseIntParam } from '../_shared';
+import { logCMAOperation } from '@/lib/contentful/logCmaOperation';
 
 export async function GET(req: Request) {
   try {
@@ -48,8 +49,16 @@ export async function POST(req: Request) {
       { fields: localizedFields },
     );
 
+    logCMAOperation({
+      action: 'CREATE',
+      contentType: body.contentTypeId,
+      entryId: created?.sys?.id ? String(created.sys.id) : null,
+      payload: { fields: body.fields },
+      response: { sys: created?.sys },
+    });
     return jsonOk({ item: created }, { status: 201 });
   } catch (e) {
+    logCMAOperation({ action: 'CREATE', contentType: null, entryId: null, error: e });
     return jsonError(e, 500);
   }
 }

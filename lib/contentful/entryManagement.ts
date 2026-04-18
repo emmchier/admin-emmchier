@@ -2,6 +2,7 @@ import 'server-only';
 
 import type { PlainClientAPI } from 'contentful-management';
 import type { ContentfulClients } from '@/lib/contentful/clients';
+import { logCMAOperation } from '@/lib/contentful/logCmaOperation';
 
 export type JsonPrimitive = string | number | boolean | null;
 export type JsonValue = JsonPrimitive | JsonValue[] | { [k: string]: JsonValue };
@@ -47,11 +48,30 @@ export async function managementCreateEntry(
   const { contentTypeId, fields } = args;
   const { managementClient: client, spaceId, environmentId } = clients;
 
-  const allowed = await allowedFieldIds(client, spaceId, environmentId, contentTypeId);
-  const safeFields = filterToContentTypeFields(fields, allowed);
-  const localizedFields = localizeFieldsMap(safeFields, entryLocale);
+  try {
+    const allowed = await allowedFieldIds(client, spaceId, environmentId, contentTypeId);
+    const safeFields = filterToContentTypeFields(fields, allowed);
+    const localizedFields = localizeFieldsMap(safeFields, entryLocale);
 
-  return client.entry.create({ spaceId, environmentId, contentTypeId }, { fields: localizedFields });
+    const created = await client.entry.create({ spaceId, environmentId, contentTypeId }, { fields: localizedFields });
+    logCMAOperation({
+      action: 'CREATE',
+      contentType: contentTypeId,
+      entryId: created?.sys?.id ? String(created.sys.id) : null,
+      payload: { fields: safeFields },
+      response: { sys: created?.sys },
+    });
+    return created;
+  } catch (error) {
+    logCMAOperation({
+      action: 'CREATE',
+      contentType: contentTypeId,
+      entryId: null,
+      payload: { fields },
+      error,
+    });
+    throw error;
+  }
 }
 
 export async function managementUpdateEntry(
@@ -62,33 +82,83 @@ export async function managementUpdateEntry(
   const { entryId, fields } = args;
   const { managementClient: client, spaceId, environmentId } = clients;
 
-  const existing = await client.entry.get({ spaceId, environmentId, entryId });
-  const contentTypeId = existing.sys.contentType.sys.id;
-  const allowed = await allowedFieldIds(client, spaceId, environmentId, contentTypeId);
-  const safeFields = filterToContentTypeFields(fields, allowed);
+  let contentTypeId: string | null = null;
+  try {
+    const existing = await client.entry.get({ spaceId, environmentId, entryId });
+    contentTypeId = existing?.sys?.contentType?.sys?.id ? String(existing.sys.contentType.sys.id) : null;
+    const allowed = await allowedFieldIds(client, spaceId, environmentId, String(contentTypeId || ''));
+    const safeFields = filterToContentTypeFields(fields, allowed);
 
-  const mergedFields = { ...(existing.fields ?? {}) } as Record<string, Record<string, unknown>>;
+    const mergedFields = { ...(existing.fields ?? {}) } as Record<string, Record<string, unknown>>;
+    for (const [k, v] of Object.entries(safeFields)) {
+      mergedFields[k] = { ...(mergedFields[k] ?? {}), [entryLocale]: v };
+    }
 
-  for (const [k, v] of Object.entries(safeFields)) {
-    mergedFields[k] = { ...(mergedFields[k] ?? {}), [entryLocale]: v };
+    const updated = await client.entry.update({ spaceId, environmentId, entryId }, { ...existing, fields: mergedFields });
+    logCMAOperation({
+      action: 'UPDATE',
+      contentType: contentTypeId,
+      entryId,
+      payload: { fields: safeFields },
+      response: { sys: updated?.sys },
+    });
+    return updated;
+  } catch (error) {
+    logCMAOperation({
+      action: 'UPDATE',
+      contentType: contentTypeId,
+      entryId,
+      payload: { fields },
+      error,
+    });
+    throw error;
   }
-
-  return client.entry.update({ spaceId, environmentId, entryId }, { ...existing, fields: mergedFields });
 }
 
 export async function managementDeleteEntry(clients: ContentfulClients, entryId: string) {
   const { managementClient: client, spaceId, environmentId } = clients;
-  await client.entry.delete({ spaceId, environmentId, entryId });
+  try {
+    await client.entry.delete({ spaceId, environmentId, entryId });
+    logCMAOperation({ action: 'DELETE', entryId, response: { ok: true } });
+  } catch (error) {
+    logCMAOperation({ action: 'DELETE', entryId, error });
+    throw error;
+  }
 }
 
 export async function managementPublishEntry(clients: ContentfulClients, entryId: string) {
   const { managementClient: client, spaceId, environmentId } = clients;
-  const entry = await client.entry.get({ spaceId, environmentId, entryId });
-  return client.entry.publish({ spaceId, environmentId, entryId }, entry);
+  let contentTypeId: string | null = null;
+  try {
+    const entry = await client.entry.get({ spaceId, environmentId, entryId });
+    contentTypeId = entry?.sys?.contentType?.sys?.id ? String(entry.sys.contentType.sys.id) : null;
+    const published = await client.entry.publish({ spaceId, environmentId, entryId }, entry);
+    logCMAOperation({ action: 'PUBLISH', contentType: contentTypeId, entryId, response: { sys: published?.sys } });
+    return published;
+  } catch (error) {
+    logCMAOperation({ action: 'PUBLISH', contentType: contentTypeId, entryId, error });
+    throw error;
+  }
 }
 
 export async function managementUnpublishEntry(clients: ContentfulClients, entryId: string) {
   const { managementClient: client, spaceId, environmentId } = clients;
-  const entry = await client.entry.get({ spaceId, environmentId, entryId });
-  return client.entry.unpublish({ spaceId, environmentId, entryId }, entry);
+  let contentTypeId: string | null = null;
+  try {
+    const entry = await client.entry.get({ spaceId, environmentId, entryId });
+    contentTypeId = entry?.sys?.contentType?.sys?.id ? String(entry.sys.contentType.sys.id) : null;
+    const unpublished = await client.entry.unpublish({ spaceId, environmentId, entryId }, entry);
+    logCMAOperation({ action: 'UNPUBLISH', contentType: contentTypeId, entryId, response: { sys: unpublished?.sys } });
+    return unpublished;
+  } catch (error) {
+    // Contentful returns 400 "Not published" if we try to unpublish a draft.
+    // Treat as a no-op to keep UI flows resilient.
+    const msg = error instanceof Error ? error.message : '';
+    if (msg.includes('Not published')) {
+      logCMAOperation({ action: 'UNPUBLISH', contentType: contentTypeId, entryId, response: { ok: true, noop: true } });
+      return { sys: { id: entryId } } as any;
+    }
+    logCMAOperation({ action: 'UNPUBLISH', contentType: contentTypeId, entryId, error });
+    throw error;
+  }
 }

@@ -78,7 +78,7 @@ export function HubEntrySideSheet(props: HubEntrySideSheetProps) {
         <SheetHeader className="shrink-0 border-b border-neutral-200">
           <SheetTitle className="text-base">{title}</SheetTitle>
         </SheetHeader>
-        <div className="flex h-full min-h-0 flex-1 flex-col">
+        <div className="flex h-full min-h-0 flex-1 flex-col pt-6">
           <EntryEditor
             contentTypeId={contentTypeId}
             entryLocale={entryLocale}

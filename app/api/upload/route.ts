@@ -5,7 +5,8 @@ import path from 'node:path';
 import sharp from 'sharp';
 import { getContentfulEnv, getEntryLocale, getImageAssetContentTypeId } from '@/lib/contentful-env';
 import { isSpaceId } from '@/lib/spaces';
-import { artClients } from '@/lib/contentful/clients';
+import type { SpaceId } from '@/lib/spaces';
+import { getClientsFor } from '@/lib/contentful/clients';
 
 export const runtime = 'nodejs';
 
@@ -136,7 +137,7 @@ export async function POST(req: Request) {
     if (!isSpaceId(spaceParam)) {
       return NextResponse.json({ error: 'Invalid space parameter' }, { status: 400 });
     }
-    const space = spaceParam;
+    const space = spaceParam as SpaceId;
 
     const formData = await req.formData();
     const file = formData.get('file');
@@ -206,8 +207,7 @@ export async function POST(req: Request) {
       const entryLocale = getEntryLocale();
       const imageAssetTypeId = getImageAssetContentTypeId();
 
-      // Reuse the server CMA singleton to avoid extra client instantiation.
-      const client = artClients.managementClient;
+      const client = getClientsFor(space).managementClient;
 
       if (processedBuffer.length === 0) {
         throw new Error('Processed image buffer is empty');

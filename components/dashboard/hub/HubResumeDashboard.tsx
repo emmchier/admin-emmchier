@@ -3,22 +3,22 @@
 import * as React from 'react';
 import type { ArtActions } from '@/components/dashboard/art/ArtDashboard';
 import type { EntryEditorLabels } from '@/components/cms/EntryEditor';
-import { HubEntrySideSheet } from '@/components/dashboard/hub/HubEntrySideSheet';
 import { HubExperienceSideSheet } from '@/components/dashboard/hub/HubExperienceSideSheet';
 import { HubCourseSideSheet } from '@/components/dashboard/hub/HubCourseSideSheet';
 import { HubStudySideSheet } from '@/components/dashboard/hub/HubStudySideSheet';
 import { HubLanguageSideSheet } from '@/components/dashboard/hub/HubLanguageSideSheet';
 import { HubCachedEntryList } from '@/components/dashboard/hub/HubCachedEntryList';
-import { HubCourseDetail, HubExperienceDetail, HubLanguageDetail, HubStudyDetail, HubTechDetail } from '@/components/dashboard/hub/HubResumeDetails';
+import { HubCourseDetail, HubExperienceDetail, HubLanguageDetail, HubStudyDetail } from '@/components/dashboard/hub/HubResumeDetails';
 import { Button } from '@/components/ui/button';
-import { ensureHubModelLoaded } from '@/lib/store/ensureHubModelLoaded';
 import { useHubStore } from '@/lib/store/hubStore';
 import { Input } from '@/components/ui/input';
 import { Loader2, RefreshCw, Save, X, Plus } from 'lucide-react';
 import { getHubAssetPreview } from '@/lib/hub/assetUrlCache';
 import { toast } from '@/lib/ui/snackbar';
+import { contentfulService } from '@/services/contentfulService';
+import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '@/components/ui/tooltip';
 
-type HubResumeSection = 'experience' | 'course' | 'study' | 'language' | 'tech';
+type HubResumeSection = 'experience' | 'course' | 'study' | 'language';
 
 type SectionCfg = {
   label: string;
@@ -30,7 +30,7 @@ type SectionCfg = {
   editorLabels: Partial<EntryEditorLabels>;
 };
 
-const HUB_RESUME_SECTIONS: HubResumeSection[] = ['experience', 'course', 'study', 'language', 'tech'];
+const HUB_RESUME_SECTIONS: HubResumeSection[] = ['experience', 'course', 'study', 'language'];
 
 const SECTION_CONFIG: Record<HubResumeSection, SectionCfg> = {
   experience: {
@@ -41,13 +41,13 @@ const SECTION_CONFIG: Record<HubResumeSection, SectionCfg> = {
     entityPluralLabel: 'Work Experiences',
     newLabel: 'New Experience',
     editorLabels: {
-      createSubtitle: 'Nueva experiencia',
-      createEmptyTitle: 'Nueva experiencia',
+      createSubtitle: 'New Experience',
+      createEmptyTitle: 'New Experience',
       editEmptyTitle: 'Experience',
-      publishToast: 'Experiencia publicada',
-      unpublishToast: 'Experiencia oculta',
-      deleteDialogTitle: 'Eliminar experiencia',
-      deleteDialogDescription: (t) => `¿Eliminar la experiencia '${t}'?`,
+      publishToast: 'Experience published',
+      unpublishToast: 'Experience unpublished',
+      deleteDialogTitle: 'Delete experience',
+      deleteDialogDescription: (t) => `Delete the experience '${t}'?`,
     },
   },
   course: {
@@ -58,13 +58,13 @@ const SECTION_CONFIG: Record<HubResumeSection, SectionCfg> = {
     entityPluralLabel: 'Courses',
     newLabel: 'New Course',
     editorLabels: {
-      createSubtitle: 'Nuevo curso',
-      createEmptyTitle: 'Nuevo curso',
+      createSubtitle: 'New Course',
+      createEmptyTitle: 'New Course',
       editEmptyTitle: 'Course',
-      publishToast: 'Curso publicado',
-      unpublishToast: 'Curso oculto',
-      deleteDialogTitle: 'Eliminar curso',
-      deleteDialogDescription: (t) => `¿Eliminar el curso '${t}'?`,
+      publishToast: 'Course published',
+      unpublishToast: 'Course unpublished',
+      deleteDialogTitle: 'Delete course',
+      deleteDialogDescription: (t) => `Delete the course '${t}'?`,
     },
   },
   study: {
@@ -75,13 +75,13 @@ const SECTION_CONFIG: Record<HubResumeSection, SectionCfg> = {
     entityPluralLabel: 'Studies',
     newLabel: 'New Study',
     editorLabels: {
-      createSubtitle: 'Nuevo estudio',
-      createEmptyTitle: 'Nuevo estudio',
+      createSubtitle: 'New Study',
+      createEmptyTitle: 'New Study',
       editEmptyTitle: 'Study',
-      publishToast: 'Estudio publicado',
-      unpublishToast: 'Estudio oculto',
-      deleteDialogTitle: 'Eliminar estudio',
-      deleteDialogDescription: (t) => `¿Eliminar el estudio '${t}'?`,
+      publishToast: 'Study published',
+      unpublishToast: 'Study unpublished',
+      deleteDialogTitle: 'Delete study',
+      deleteDialogDescription: (t) => `Delete the study '${t}'?`,
     },
   },
   language: {
@@ -92,49 +92,23 @@ const SECTION_CONFIG: Record<HubResumeSection, SectionCfg> = {
     entityPluralLabel: 'Languages',
     newLabel: 'New Language',
     editorLabels: {
-      createSubtitle: 'Nuevo idioma',
-      createEmptyTitle: 'Nuevo idioma',
+      createSubtitle: 'New Language',
+      createEmptyTitle: 'New Language',
       editEmptyTitle: 'Language',
-      publishToast: 'Idioma publicado',
-      unpublishToast: 'Idioma oculto',
-      deleteDialogTitle: 'Eliminar idioma',
-      deleteDialogDescription: (t) => `¿Eliminar el idioma '${t}'?`,
-    },
-  },
-  tech: {
-    label: 'Techs',
-    contentTypeId: 'tech',
-    primaryFieldId: 'nameEn',
-    displayTitleFieldId: 'nameEn',
-    entityPluralLabel: 'Techs',
-    newLabel: 'New Tech',
-    editorLabels: {
-      createSubtitle: 'Nueva tech',
-      createEmptyTitle: 'Nueva tech',
-      editEmptyTitle: 'Tech',
-      publishToast: 'Tech publicada',
-      unpublishToast: 'Tech oculta',
-      deleteDialogTitle: 'Eliminar tech',
-      deleteDialogDescription: (t) => `¿Eliminar la tech '${t}'?`,
+      publishToast: 'Language published',
+      unpublishToast: 'Language unpublished',
+      deleteDialogTitle: 'Delete language',
+      deleteDialogDescription: (t) => `Delete the language '${t}'?`,
     },
   },
 };
 
-const SECTION_MODEL: Record<HubResumeSection, 'experience' | 'course' | 'study' | 'language' | 'tech'> = {
+const SECTION_MODEL: Record<HubResumeSection, 'experience' | 'course' | 'study' | 'language'> = {
   experience: 'experience',
   course: 'course',
   study: 'study',
   language: 'language',
-  tech: 'tech',
 };
-
-function sheetTitleFromNewLabel(newLabel: string, mode: 'create' | 'edit'): string {
-  const trimmed = (newLabel || '').trim();
-  if (!trimmed) return mode === 'create' ? 'New item' : 'Edit item';
-  if (mode === 'create') return trimmed;
-  const base = trimmed.toLowerCase().startsWith('new ') ? trimmed.slice(4).trim() : trimmed;
-  return `Edit ${base || 'item'}`;
-}
 
 export function HubResumeDashboard(props: {
   entryLocale: string;
@@ -158,7 +132,12 @@ export function HubResumeDashboard(props: {
   const cfg = SECTION_CONFIG[activeSection];
   const activeModel = SECTION_MODEL[activeSection];
 
-  const openCreate = React.useCallback(() => setCreateOpen(true), []);
+  const openCreate = React.useCallback(() => {
+    if (activeSection === 'experience') {
+      void contentfulService.getEntriesCached({ space: 'hub', contentTypeId: 'tech' });
+    }
+    setCreateOpen(true);
+  }, [activeSection]);
   const openDetail = React.useCallback((id: string) => setDetailId(id), []);
 
   const loaded = useHubStore((s) => s.loaded);
@@ -168,7 +147,6 @@ export function HubResumeDashboard(props: {
   const courseCount = useHubStore((s) => (s.loaded.course ? Object.keys(s.courses).length : null));
   const studyCount = useHubStore((s) => (s.loaded.study ? Object.keys(s.studies).length : null));
   const languageCount = useHubStore((s) => (s.loaded.language ? Object.keys(s.languages).length : null));
-  const techCount = useHubStore((s) => (s.loaded.tech ? Object.keys(s.techs).length : null));
 
   const resumeEntry = React.useMemo(() => {
     const first = Object.values(resumeRecord)[0] as any | undefined;
@@ -199,9 +177,8 @@ export function HubResumeDashboard(props: {
       course: safe(courseCount ?? (resumeLoaded ? countLinks('courses') : 0)),
       study: safe(studyCount ?? (resumeLoaded ? countLinks('studies') : 0)),
       language: safe(languageCount ?? (resumeLoaded ? countLinks('languages') : 0)),
-      tech: safe(techCount ?? 0),
     };
-  }, [countLinks, courseCount, experienceCount, languageCount, resumeLoaded, studyCount, techCount]);
+  }, [countLinks, courseCount, experienceCount, languageCount, resumeLoaded, studyCount]);
 
   const roles = React.useMemo(() => {
     const f = (resumeEntry?.fields ?? {}) as Record<string, any>;
@@ -223,31 +200,21 @@ export function HubResumeDashboard(props: {
     return id || null;
   }, [entryLocale, resumeEntry]);
 
-  // Experience detail uses tech multiselect from HUB store (no fetch in detail).
-  // Ensure techs are available at the dashboard layer (lazy + cache-first).
-  React.useEffect(() => {
-    if (activeSection !== 'experience') return;
-    void ensureHubModelLoaded('tech');
-  }, [activeSection]);
+  const ensuredResumeRef = React.useRef(false);
+  if (!resumeLoaded && !ensuredResumeRef.current) {
+    ensuredResumeRef.current = true;
+    void contentfulService.getEntriesCached({ space: 'hub', contentTypeId: 'resume' });
+  }
 
-  React.useEffect(() => {
-    if (resumeLoaded) return;
-    void ensureHubModelLoaded('resume');
-  }, [resumeLoaded]);
-
-  React.useEffect(() => {
-    let cancelled = false;
+  const lastProfileAssetIdRef = React.useRef<string | null>(null);
+  if (profileAssetId !== lastProfileAssetIdRef.current) {
+    lastProfileAssetIdRef.current = profileAssetId;
     if (!profileAssetId) {
       setAvatarUrl(null);
-      return;
+    } else {
+      void getHubAssetPreview(profileAssetId).then((p) => setAvatarUrl(p.url ?? null));
     }
-    void getHubAssetPreview(profileAssetId).then((p) => {
-      if (!cancelled) setAvatarUrl(p.url ?? null);
-    });
-    return () => {
-      cancelled = true;
-    };
-  }, [profileAssetId]);
+  }
 
   const onPickAvatar = React.useCallback(
     async (file: File | null) => {
@@ -353,32 +320,48 @@ export function HubResumeDashboard(props: {
             <div className="flex items-center justify-between">
               <p className="text-xs font-semibold uppercase tracking-wide text-neutral-500">Roles</p>
               <div className="flex items-center gap-2">
-                <Button
-                  type="button"
-                  variant="outline"
-                  size="icon"
-                  onClick={() => {
-                    setRolesDraft((prev) => {
-                      const next = [...prev, ''];
-                      setEditingRoleIdx(next.length - 1);
-                      return next;
-                    });
-                  }}
-                  disabled={!resumeId}
-                >
-                  <Plus className="h-4 w-4" />
-                  <span className="sr-only">Add role</span>
-                </Button>
-                <Button
-                  type="button"
-                  variant="outline"
-                  size="icon"
-                  onClick={() => void saveRoles()}
-                  disabled={!rolesDirty || rolesBusy || !resumeId}
-                >
-                  {rolesBusy ? <Loader2 className="h-4 w-4 animate-spin" /> : <Save className="h-4 w-4" />}
-                  <span className="sr-only">Save</span>
-                </Button>
+                <TooltipProvider>
+                  <Tooltip>
+                    <TooltipTrigger asChild>
+                      <Button
+                        type="button"
+                        variant="outline"
+                        size="icon"
+                        onClick={() => {
+                          setRolesDraft((prev) => {
+                            const next = [...prev, ''];
+                            setEditingRoleIdx(next.length - 1);
+                            return next;
+                          });
+                        }}
+                        disabled={!resumeId}
+                        aria-label="Add role"
+                      >
+                        <Plus className="h-4 w-4" />
+                        <span className="sr-only">Add role</span>
+                      </Button>
+                    </TooltipTrigger>
+                    <TooltipContent>Add role</TooltipContent>
+                  </Tooltip>
+                </TooltipProvider>
+                <TooltipProvider>
+                  <Tooltip>
+                    <TooltipTrigger asChild>
+                      <Button
+                        type="button"
+                        variant="outline"
+                        size="icon"
+                        onClick={() => void saveRoles()}
+                        disabled={!rolesDirty || rolesBusy || !resumeId}
+                        aria-label="Save"
+                      >
+                        {rolesBusy ? <Loader2 className="h-4 w-4 animate-spin" /> : <Save className="h-4 w-4" />}
+                        <span className="sr-only">Save</span>
+                      </Button>
+                    </TooltipTrigger>
+                    <TooltipContent>Save</TooltipContent>
+                  </Tooltip>
+                </TooltipProvider>
               </div>
             </div>
 
@@ -422,7 +405,16 @@ export function HubResumeDashboard(props: {
                           setEditingRoleIdx((cur) => (cur === idx ? null : cur != null && cur > idx ? cur - 1 : cur));
                         }}
                       >
-                        <X className="h-3.5 w-3.5" />
+                        <TooltipProvider>
+                          <Tooltip>
+                            <TooltipTrigger asChild>
+                              <span className="inline-flex">
+                                <X className="h-3.5 w-3.5" />
+                              </span>
+                            </TooltipTrigger>
+                            <TooltipContent>Remove</TooltipContent>
+                          </Tooltip>
+                        </TooltipProvider>
                       </button>
                     </div>
                   );
@@ -449,15 +441,14 @@ export function HubResumeDashboard(props: {
                       ? sidebarCounts.course
                       : s === 'study'
                         ? sidebarCounts.study
-                        : s === 'language'
-                          ? sidebarCounts.language
-                          : sidebarCounts.tech;
+                        : sidebarCounts.language;
                 return (
                   <button
                     key={s}
                     type="button"
                     disabled={isActive}
                     onClick={() => {
+                      void contentfulService.getEntriesCached({ space: 'hub', contentTypeId: SECTION_CONFIG[s].contentTypeId });
                       setActiveSection(s);
                       setCreateOpen(false);
                       setDetailId(null);
@@ -494,9 +485,7 @@ export function HubResumeDashboard(props: {
               <HubStudyDetail entryId={detailId} entryLocale={entryLocale} actions={actions} onBack={() => setDetailId(null)} onDeleted={() => setListVersion((v) => v + 1)} />
             ) : activeSection === 'language' ? (
               <HubLanguageDetail entryId={detailId} entryLocale={entryLocale} actions={actions} onBack={() => setDetailId(null)} onDeleted={() => setListVersion((v) => v + 1)} />
-            ) : (
-              <HubTechDetail entryId={detailId} entryLocale={entryLocale} actions={actions} onBack={() => setDetailId(null)} onDeleted={() => setListVersion((v) => v + 1)} />
-            )
+            ) : null
           ) : (
             <HubCachedEntryList
               key={`${cfg.contentTypeId}-${listVersion}`}
@@ -578,28 +567,7 @@ export function HubResumeDashboard(props: {
           }}
           onCreated={() => setCreateOpen(false)}
         />
-      ) : (
-        <HubEntrySideSheet
-          open={createOpen}
-          onOpenChange={(open) => {
-            setCreateOpen(open);
-            if (!open) setListVersion((v) => v + 1);
-          }}
-          title={sheetTitleFromNewLabel(cfg.newLabel, 'create')}
-          entryLocale={entryLocale}
-          contentfulSpaceId={contentfulSpaceId}
-          actions={actions}
-          contentTypeId={cfg.contentTypeId}
-          displayTitleFieldId={cfg.displayTitleFieldId}
-          mode="create"
-          entryId={null}
-          labels={cfg.editorLabels}
-          onMutated={() => {
-            setListVersion((v) => v + 1);
-          }}
-          onCreated={() => setCreateOpen(false)}
-        />
-      )}
+      ) : null}
     </div>
   );
 }

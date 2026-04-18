@@ -1,13 +1,48 @@
 'use client';
 
 import * as React from 'react';
+import {
+  DndContext,
+  type DragEndEvent,
+  KeyboardSensor,
+  PointerSensor,
+  closestCenter,
+  useSensor,
+  useSensors,
+} from '@dnd-kit/core';
+import {
+  SortableContext,
+  arrayMove,
+  sortableKeyboardCoordinates,
+  useSortable,
+  verticalListSortingStrategy,
+} from '@dnd-kit/sortable';
+import { CSS } from '@dnd-kit/utilities';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
-import { Separator } from '@/components/ui/separator';
+import { Textarea } from '@/components/ui/textarea';
 import { Dialog, DialogContent } from '@/components/ui/dialog';
 import { Sheet, SheetContent, SheetFooter, SheetHeader, SheetTitle } from '@/components/ui/sheet';
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from '@/components/ui/alert-dialog';
 import { GripVertical, Trash2, ArrowLeft, ImagePlus } from 'lucide-react';
+import { contentfulService } from '@/services/contentfulService';
+import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '@/components/ui/tooltip';
+import {
+  EntryFieldCharacterFooter,
+  ENTRY_FIELD_CHAR_LIMIT,
+  clampEntryFieldString,
+} from '@/components/cms/entryFieldCharacterLimit';
+import { cn } from '@/lib/utils';
 
 type EntryLink = { sys: { type: 'Link'; linkType: 'Entry'; id: string } };
 
@@ -21,10 +56,129 @@ type UploadItem = {
   progress: number;
   error?: string;
   entryId?: string;
+  abort?: AbortController;
 };
 
 const ALLOWED = new Set(['image/png', 'image/jpeg', 'image/jpg', 'image/webp', 'image/tiff']);
 const MAX_BYTES = 15 * 1024 * 1024;
+
+/** Display + upload “image name” (title) cap — list rows and asset title field */
+const IMAGE_NAME_MAX = 50;
+
+function truncateImageNameLabel(name: string, max = IMAGE_NAME_MAX): string {
+  if (name.length <= max) return name;
+  return `${name.slice(0, max)}…`;
+}
+
+function SortableLinkedImageRow(props: {
+  entryId: string;
+  displayTitleFull: string;
+  url: string | null;
+  onPreview: () => void;
+  onRemoveRequest: () => void;
+}) {
+  const { entryId, displayTitleFull, url, onPreview, onRemoveRequest } = props;
+  const {
+    attributes,
+    listeners,
+    setNodeRef,
+    transform,
+    transition,
+    isDragging,
+  } = useSortable({ id: entryId });
+
+  const style: React.CSSProperties = {
+    transform: CSS.Transform.toString(transform),
+    transition,
+  };
+
+  const shown = truncateImageNameLabel(displayTitleFull);
+  const showTip = displayTitleFull.length > IMAGE_NAME_MAX;
+
+  return (
+    <div
+      ref={setNodeRef}
+      style={style}
+      className={cn(
+        'flex items-center gap-3 bg-white px-4 py-4 outline-none transition-[opacity,transform,box-shadow] duration-200 ease-out',
+        isDragging &&
+          'relative z-20 scale-[0.995] opacity-90 shadow-xl ring-2 ring-zinc-900/20',
+      )}
+    >
+      <button
+        type="button"
+        className={cn(
+          'flex shrink-0 cursor-grab touch-none items-center rounded-md border border-transparent p-1 text-zinc-400 hover:bg-zinc-100 hover:text-zinc-700 active:cursor-grabbing',
+          isDragging && 'text-zinc-900',
+        )}
+        aria-label="Reorder"
+        {...attributes}
+        {...listeners}
+      >
+        <GripVertical className="h-4 w-4" />
+      </button>
+      <div className="flex min-w-0 flex-1 items-center gap-3 overflow-hidden">
+        <button
+          type="button"
+          className="h-12 w-12 shrink-0 overflow-hidden border border-neutral-200 bg-neutral-50"
+          onClick={() => {
+            if (!url) return;
+            onPreview();
+          }}
+          aria-label={url ? 'Ver imagen' : 'Imagen no disponible'}
+          disabled={!url}
+        >
+          {url ? (
+            // eslint-disable-next-line @next/next/no-img-element
+            <img
+              src={url}
+              alt={shown}
+              className="h-full w-full object-cover"
+              loading="eager"
+              decoding="async"
+            />
+          ) : (
+            <div className="h-full w-full" />
+          )}
+        </button>
+        <div className="min-w-0 flex-1 overflow-hidden">
+          <TooltipProvider delayDuration={300}>
+            <Tooltip>
+              <TooltipTrigger asChild>
+                <p className="block min-w-0 truncate text-sm font-medium leading-snug text-zinc-900">
+                  {shown}
+                </p>
+              </TooltipTrigger>
+              {showTip ? (
+                <TooltipContent side="top" align="start" className="max-w-sm whitespace-pre-wrap">
+                  {displayTitleFull}
+                </TooltipContent>
+              ) : null}
+            </Tooltip>
+          </TooltipProvider>
+          <p className="mt-0.5 truncate font-mono text-[11px] leading-tight text-zinc-500">{entryId}</p>
+        </div>
+      </div>
+      <TooltipProvider>
+        <Tooltip>
+          <TooltipTrigger asChild>
+            <Button
+              type="button"
+              variant="ghost"
+              size="icon"
+              className="shrink-0"
+              onClick={onRemoveRequest}
+              aria-label="Remove image from gallery"
+            >
+              <Trash2 className="h-4 w-4" />
+            </Button>
+          </TooltipTrigger>
+          <TooltipContent>Remove image from gallery</TooltipContent>
+        </Tooltip>
+      </TooltipProvider>
+    </div>
+  );
+}
 
 type PreviewMap = Record<string, { url: string | null }>;
 const previewsCache = new Map<string, PreviewMap>();
@@ -49,9 +203,9 @@ export const ProjectGalleryUploader = React.forwardRef<ProjectGalleryUploaderHan
   const [sheetOpen, setSheetOpen] = React.useState(false);
   const [sheetView, setSheetView] = React.useState<'grid' | 'detail'>('grid');
   const [selectedQueueId, setSelectedQueueId] = React.useState<string | null>(null);
-  const draggingIdRef = React.useRef<string | null>(null);
   const [previewOpen, setPreviewOpen] = React.useState(false);
   const [previewImage, setPreviewImage] = React.useState<{ url: string; title: string } | null>(null);
+  const [pendingRemoveLinkedId, setPendingRemoveLinkedId] = React.useState<string | null>(null);
 
   const slugSafe = (projectSlug || '').trim();
 
@@ -90,16 +244,13 @@ export const ProjectGalleryUploader = React.forwardRef<ProjectGalleryUploaderHan
         const run =
           pending ??
           (async () => {
-            const res = await fetch(`${managementApiRoot}/image-assets?ids=${encodeURIComponent(ids.join(','))}`, {
-              cache: 'no-store',
-            });
-            const data = (await res.json()) as any;
-            if (!res.ok) return {};
             const map: PreviewMap = {};
-            for (const it of data.items || []) {
-              const entryId = String(it.entryId ?? '');
+            const space = contentfulService.inferSpaceFromManagementApiRoot(managementApiRoot);
+            const items = await contentfulService.getImageAssetPreviews({ space, entryIds: ids });
+            for (const it of items || []) {
+              const entryId = String((it as any).entryId ?? '');
               if (!entryId) continue;
-              map[entryId] = { url: it.url ?? null };
+              map[entryId] = { url: (it as any).url ?? null };
             }
             previewsCache.set(cacheKey, map);
             return map;
@@ -150,18 +301,77 @@ export const ProjectGalleryUploader = React.forwardRef<ProjectGalleryUploaderHan
       next.push({
         id: makeId(),
         file: f,
-        title: stem,
-        alt: stem,
+        title: clampEntryFieldString(stem, IMAGE_NAME_MAX),
+        alt: clampEntryFieldString(stem, ENTRY_FIELD_CHAR_LIMIT),
         previewUrl: URL.createObjectURL(f),
         status: 'idle',
         progress: 0,
       });
     }
     setItems((prev) => [...prev, ...next]);
+
+    // Auto-upload (convert/compress server-side) immediately on add.
+    for (const it of next) {
+      if (it.status !== 'idle') continue;
+      void (async () => {
+        // XHR gives us upload progress; conversion time is reflected as "processing" near the end.
+        const form = new FormData();
+        form.set('file', it.file);
+        form.set(
+          'title',
+          clampEntryFieldString(it.title.trim() || it.file.name, IMAGE_NAME_MAX),
+        );
+        form.set(
+          'alt',
+          clampEntryFieldString(it.alt.trim() || it.file.name, ENTRY_FIELD_CHAR_LIMIT),
+        );
+
+        setItems((prev) =>
+          prev.map((x) => (x.id === it.id ? { ...x, status: 'uploading', progress: 1, error: undefined } : x)),
+        );
+
+        try {
+          const entryId = await new Promise<string>((resolve, reject) => {
+            const xhr = new XMLHttpRequest();
+            xhr.open('POST', '/api/upload?space=art');
+            xhr.responseType = 'json';
+
+            xhr.upload.onprogress = (ev) => {
+              if (!ev.lengthComputable) return;
+              const pct = Math.max(1, Math.min(95, Math.round((ev.loaded / ev.total) * 95)));
+              setItems((prev) => prev.map((x) => (x.id === it.id ? { ...x, progress: pct } : x)));
+            };
+
+            xhr.onload = () => {
+              const ok = xhr.status >= 200 && xhr.status < 300;
+              const data = xhr.response as any;
+              if (!ok) return reject(new Error(data?.error || 'Upload failed'));
+              const id = typeof data?.entryId === 'string' ? data.entryId : '';
+              if (!id) return reject(new Error('Missing entryId in response'));
+              resolve(id);
+            };
+
+            xhr.onerror = () => reject(new Error('Upload failed'));
+            xhr.onabort = () => reject(new Error('Upload canceled'));
+
+            xhr.send(form);
+          });
+
+          setItems((prev) => prev.map((x) => (x.id === it.id ? { ...x, status: 'done', progress: 100, entryId } : x)));
+        } catch (e) {
+          const msg = e instanceof Error ? e.message : 'Upload failed';
+          setItems((prev) => prev.map((x) => (x.id === it.id ? { ...x, status: 'error', progress: 0, error: msg } : x)));
+        }
+      })();
+    }
   }, []);
 
   const setField = React.useCallback((id: string, key: 'title' | 'alt', v: string) => {
-    setItems((prev) => prev.map((it) => (it.id === id ? { ...it, [key]: v } : it)));
+    const capped =
+      key === 'title'
+        ? clampEntryFieldString(v, IMAGE_NAME_MAX)
+        : clampEntryFieldString(v, ENTRY_FIELD_CHAR_LIMIT);
+    setItems((prev) => prev.map((it) => (it.id === id ? { ...it, [key]: capped } : it)));
   }, []);
 
   const removeLocal = React.useCallback((id: string) => {
@@ -170,38 +380,23 @@ export const ProjectGalleryUploader = React.forwardRef<ProjectGalleryUploaderHan
       if (it?.previewUrl) URL.revokeObjectURL(it.previewUrl);
       return prev.filter((x) => x.id !== id);
     });
-  }, []);
-
-  const uploadAll = React.useCallback(async () => {
-    const targets = items.filter((it) => it.status === 'idle' && it.title.trim() && it.alt.trim());
-    for (const it of targets) {
-      setItems((prev) => prev.map((x) => (x.id === it.id ? { ...x, status: 'uploading', progress: 10, error: undefined } : x)));
-
-      const form = new FormData();
-      form.set('file', it.file);
-      form.set('title', it.title.trim());
-      form.set('alt', it.alt.trim());
-
-      try {
-        const res = await fetch('/api/upload?space=art', { method: 'POST', body: form });
-        const data = (await res.json()) as any;
-        if (!res.ok) throw new Error(data?.error || 'Falló la subida');
-        const entryId: string | undefined = typeof data?.entryId === 'string' ? data.entryId : undefined;
-        if (!entryId) throw new Error('Falta entryId en la respuesta');
-
-        setItems((prev) =>
-          prev.map((x) =>
-            x.id === it.id ? { ...x, status: 'done', progress: 100, entryId } : x,
-          ),
-        );
-
-        // Do NOT mutate the gallery immediately — user confirms with "Guardar" in the sheet.
-      } catch (e) {
-        const msg = e instanceof Error ? e.message : 'Falló la subida';
-        setItems((prev) => prev.map((x) => (x.id === it.id ? { ...x, status: 'error', progress: 0, error: msg } : x)));
-      }
+    // Best-effort cleanup: if we already created an ImageAsset entry, delete it to avoid orphaned test content.
+    const it = items.find((x) => x.id === id);
+    const entryId = it?.entryId;
+    if (entryId) {
+      void (async () => {
+        try {
+          const loaded = await contentfulService.getEntryById({ space: 'art', entryId });
+          if (loaded?.sys?.publishedAt) await contentfulService.unpublishEntry({ space: 'art', entryId });
+        } catch {
+          // ignore
+        }
+        await contentfulService.deleteEntry({ space: 'art', entryId }).catch(() => {});
+      })();
     }
-  }, [items, onChange, value]);
+  }, [items]);
+
+  // No manual "Upload" step: uploads/conversion run automatically on add.
 
   const commitUploadedToGallery = React.useCallback(() => {
     const uploaded = items.filter((it) => it.status === 'done' && it.entryId).map((it) => it.entryId!) ;
@@ -242,6 +437,29 @@ export const ProjectGalleryUploader = React.forwardRef<ProjectGalleryUploaderHan
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
+  const sensors = useSensors(
+    useSensor(PointerSensor, {
+      activationConstraint: { distance: 8 },
+    }),
+    useSensor(KeyboardSensor, {
+      coordinateGetter: sortableKeyboardCoordinates,
+    }),
+  );
+
+  const linkedSortIds = React.useMemo(() => value.map((l) => l.sys.id), [value]);
+
+  const handleLinkedDragEnd = React.useCallback(
+    (event: DragEndEvent) => {
+      const { active, over } = event;
+      if (!over || active.id === over.id) return;
+      const oldIndex = value.findIndex((x) => x.sys.id === String(active.id));
+      const newIndex = value.findIndex((x) => x.sys.id === String(over.id));
+      if (oldIndex < 0 || newIndex < 0) return;
+      onChange(arrayMove(value, oldIndex, newIndex));
+    },
+    [onChange, value],
+  );
+
   return (
     <div className="space-y-3">
       {value.length ? (
@@ -249,79 +467,45 @@ export const ProjectGalleryUploader = React.forwardRef<ProjectGalleryUploaderHan
           <div className="border-b border-neutral-200 px-4 py-4">
             <p className="text-xs font-medium text-neutral-600">Imágenes vinculadas ({value.length})</p>
           </div>
-          <div className="divide-y divide-neutral-200">
-            {value.map((l, idx) => {
-              const entryId = l.sys.id;
-              const title = desiredTitle(entryId, idx);
-              const url = previews[entryId]?.url ?? null;
+          <DndContext
+            sensors={sensors}
+            collisionDetection={closestCenter}
+            onDragEnd={handleLinkedDragEnd}
+          >
+            <SortableContext items={linkedSortIds} strategy={verticalListSortingStrategy}>
+              <div className="divide-y divide-neutral-200">
+                {value.map((l, idx) => {
+                  const entryId = l.sys.id;
+                  const displayTitleFull = desiredTitle(entryId, idx);
+                  const url = previews[entryId]?.url ?? null;
 
-              return (
-                <div
-                  key={`${slugSafe || 'proyecto'}-${idx + 1}`}
-                  className="flex items-center gap-3 px-4 py-4"
-                  draggable
-                  onDragStart={() => {
-                    draggingIdRef.current = entryId;
-                  }}
-                  onDragOver={(e) => e.preventDefault()}
-                  onDrop={() => {
-                    const from = draggingIdRef.current;
-                    draggingIdRef.current = null;
-                    if (!from || from === entryId) return;
-                    const fromIdx = value.findIndex((x) => x.sys.id === from);
-                    const toIdx = value.findIndex((x) => x.sys.id === entryId);
-                    if (fromIdx < 0 || toIdx < 0) return;
-                    const next = [...value];
-                    const [moved] = next.splice(fromIdx, 1);
-                    next.splice(toIdx, 0, moved);
-                    onChange(next);
-                  }}
-                >
-                  <div className="flex items-center gap-2">
-                    <GripVertical className="h-4 w-4 text-zinc-400" />
-                    <button
-                      type="button"
-                      className="h-12 w-12 overflow-hidden border border-neutral-200 bg-neutral-50"
-                      onClick={() => {
-                        if (!url) return;
-                        setPreviewImage({ url, title });
+                  return (
+                    <SortableLinkedImageRow
+                      key={entryId}
+                      entryId={entryId}
+                      displayTitleFull={displayTitleFull}
+                      url={url}
+                      onPreview={() => {
+                        setPreviewImage({
+                          url: url!,
+                          title: displayTitleFull,
+                        });
                         setPreviewOpen(true);
                       }}
-                      aria-label={url ? 'Ver imagen' : 'Imagen no disponible'}
-                      disabled={!url}
-                    >
-                      {url ? (
-                        // eslint-disable-next-line @next/next/no-img-element
-                        <img
-                          src={url}
-                          alt={title}
-                          className="h-full w-full object-cover"
-                          loading="eager"
-                          decoding="async"
-                        />
-                      ) : (
-                        <div className="h-full w-full" />
-                      )}
-                    </button>
-                  </div>
-                  <div className="min-w-0 flex-1">
-                    <p className="truncate text-sm font-medium text-zinc-900">{title}</p>
-                    <p className="truncate font-mono text-xs text-zinc-500">{entryId}</p>
-                  </div>
-                  <Button type="button" variant="ghost" size="icon" onClick={() => removeLinked(entryId)} aria-label="Quitar">
-                    <Trash2 className="h-4 w-4" />
-                  </Button>
-                </div>
-              );
-            })}
-          </div>
+                      onRemoveRequest={() => setPendingRemoveLinkedId(entryId)}
+                    />
+                  );
+                })}
+              </div>
+            </SortableContext>
+          </DndContext>
         </div>
       ) : null}
 
       <Sheet open={sheetOpen} onOpenChange={setSheetOpen}>
         <SheetContent side="right" className="w-full sm:max-w-lg">
           <SheetHeader>
-            <SheetTitle className="text-base">Agregar imágenes</SheetTitle>
+            <SheetTitle className="text-base">Add images</SheetTitle>
           </SheetHeader>
 
           <div className="mt-4 space-y-3">
@@ -342,47 +526,85 @@ export const ProjectGalleryUploader = React.forwardRef<ProjectGalleryUploaderHan
                 <div className="flex items-center justify-between gap-2">
                   <Button type="button" variant="outline" onClick={() => inputRef.current?.click()}>
                     <ImagePlus className="mr-2 h-4 w-4" />
-                    Seleccionar archivos
-                  </Button>
-                  <Button type="button" onClick={() => void uploadAll()} disabled={items.every((it) => it.status !== 'idle')}>
-                    Subir
+                    Select files
                   </Button>
                 </div>
 
                 {items.length ? (
                   <div className="grid grid-cols-2 gap-2">
                     {items.map((it) => (
-                      <button
-                        key={it.id}
-                        type="button"
-                        className="overflow-hidden border border-neutral-200 text-left hover:bg-neutral-50"
-                        onClick={() => {
-                          setSelectedQueueId(it.id);
-                          setSheetView('detail');
-                        }}
-                      >
-                        <div className="aspect-square w-full bg-zinc-50">
+                      <div key={it.id} className="overflow-hidden border border-neutral-200 text-left">
+                        <div className="relative aspect-square w-full bg-zinc-50">
                           {it.previewUrl ? (
                             // eslint-disable-next-line @next/next/no-img-element
-                            <img
-                              src={it.previewUrl}
-                              alt={it.title || it.file.name}
-                              className="h-full w-full object-cover"
-                            />
+                            <img src={it.previewUrl} alt={it.title || it.file.name} className="h-full w-full object-cover" />
                           ) : null}
+
+                          <div className="absolute right-2 top-2 flex items-center gap-2">
+                            <TooltipProvider>
+                              <Tooltip>
+                                <TooltipTrigger asChild>
+                                  <Button
+                                    type="button"
+                                    variant="secondary"
+                                    size="icon"
+                                    onClick={() => removeLocal(it.id)}
+                                    aria-label="Remove"
+                                  >
+                                    <Trash2 className="h-4 w-4" />
+                                  </Button>
+                                </TooltipTrigger>
+                                <TooltipContent>Remove</TooltipContent>
+                              </Tooltip>
+                            </TooltipProvider>
+                          </div>
                         </div>
-                        <div className="p-2">
-                          <p className="truncate text-xs font-medium text-zinc-900">{it.file.name}</p>
+
+                        <button
+                          type="button"
+                          className="block w-full p-2 text-left hover:bg-neutral-50"
+                          onClick={() => {
+                            setSelectedQueueId(it.id);
+                            setSheetView('detail');
+                          }}
+                        >
+                          <TooltipProvider delayDuration={300}>
+                            <Tooltip>
+                              <TooltipTrigger asChild>
+                                <p className="truncate text-xs font-medium text-zinc-900">
+                                  {truncateImageNameLabel(it.file.name)}
+                                </p>
+                              </TooltipTrigger>
+                              {it.file.name.length > IMAGE_NAME_MAX ? (
+                                <TooltipContent side="top" className="max-w-sm break-all">
+                                  {it.file.name}
+                                </TooltipContent>
+                              ) : null}
+                            </Tooltip>
+                          </TooltipProvider>
                           <p className="mt-1 text-[11px] text-zinc-500">
-                            {it.status === 'done' ? 'Subida' : it.status}
+                            {it.status === 'uploading' ? 'Uploading…' : it.status === 'done' ? 'Ready' : it.status === 'error' ? 'Error' : 'Queued'}
                           </p>
-                        </div>
-                      </button>
+                          {it.status === 'uploading' ? (
+                            <div className="mt-2 h-1.5 w-full overflow-hidden rounded bg-zinc-100">
+                              <div className="h-full bg-zinc-900" style={{ width: `${it.progress}%` }} />
+                            </div>
+                          ) : null}
+                        </button>
+                      </div>
                     ))}
                   </div>
                 ) : (
-                  <div className="border border-dashed border-neutral-300 bg-neutral-50/80 p-6 text-sm text-neutral-600">
-                    Seleccioná imágenes para subirlas.
+                  <div
+                    className="border border-dashed border-neutral-300 bg-neutral-50/80 p-6 text-sm text-neutral-600"
+                    onDragOver={(e) => e.preventDefault()}
+                    onDrop={(e) => {
+                      e.preventDefault();
+                      const files = e.dataTransfer?.files;
+                      if (files && files.length) addFiles(files);
+                    }}
+                  >
+                    Drag & drop images here, or use “Select files”.
                   </div>
                 )}
               </>
@@ -395,7 +617,7 @@ export const ProjectGalleryUploader = React.forwardRef<ProjectGalleryUploaderHan
                   className="px-0"
                 >
                   <ArrowLeft className="mr-2 h-4 w-4" />
-                  Volver
+                  Back
                 </Button>
 
                 {(() => {
@@ -422,12 +644,23 @@ export const ProjectGalleryUploader = React.forwardRef<ProjectGalleryUploaderHan
 
                       <div className="grid gap-3">
                         <div className="grid gap-1.5">
-                          <Label className="text-xs text-zinc-600">Título</Label>
-                          <Input value={it.title} onChange={(e) => setField(it.id, 'title', e.target.value)} />
+                          <Label className="text-xs text-zinc-600">Title</Label>
+                          <Input
+                            value={it.title}
+                            maxLength={IMAGE_NAME_MAX}
+                            onChange={(e) => setField(it.id, 'title', e.target.value)}
+                          />
+                          <EntryFieldCharacterFooter length={it.title.length} max={IMAGE_NAME_MAX} />
                         </div>
                         <div className="grid gap-1.5">
                           <Label className="text-xs text-zinc-600">Alt</Label>
-                          <Input value={it.alt} onChange={(e) => setField(it.id, 'alt', e.target.value)} />
+                          <Textarea
+                            value={it.alt}
+                            maxLength={ENTRY_FIELD_CHAR_LIMIT}
+                            rows={4}
+                            onChange={(e) => setField(it.id, 'alt', e.target.value)}
+                          />
+                          <EntryFieldCharacterFooter length={it.alt.length} />
                         </div>
                       </div>
 
@@ -441,7 +674,7 @@ export const ProjectGalleryUploader = React.forwardRef<ProjectGalleryUploaderHan
 
                       <div className="flex justify-end">
                         <Button type="button" variant="outline" onClick={() => removeLocal(it.id)}>
-                          Quitar
+                          Remove
                         </Button>
                       </div>
                     </div>
@@ -453,11 +686,35 @@ export const ProjectGalleryUploader = React.forwardRef<ProjectGalleryUploaderHan
 
           <SheetFooter className="mt-6">
             <Button type="button" onClick={commitUploadedToGallery}>
-              Guardar
+              Save
             </Button>
           </SheetFooter>
         </SheetContent>
       </Sheet>
+
+      <AlertDialog open={pendingRemoveLinkedId != null} onOpenChange={(open) => !open && setPendingRemoveLinkedId(null)}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>Remove image from gallery?</AlertDialogTitle>
+            <AlertDialogDescription>
+              This removes the image from this project&apos;s gallery list. Save changes to apply. The asset remains in Contentful unless you delete it separately.
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel>Cancel</AlertDialogCancel>
+            <AlertDialogAction
+              className="bg-amber-600 hover:bg-amber-600/90 focus-visible:ring-amber-600"
+              onClick={(e) => {
+                e.preventDefault();
+                if (pendingRemoveLinkedId) removeLinked(pendingRemoveLinkedId);
+                setPendingRemoveLinkedId(null);
+              }}
+            >
+              Remove
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
 
       <Dialog
         open={previewOpen}

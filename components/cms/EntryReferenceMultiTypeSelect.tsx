@@ -8,6 +8,7 @@ import { X } from 'lucide-react';
 import type { EntryLink } from '@/components/cms/EntryReferenceMultiSelect';
 import { readLocalizedField } from '@/lib/contentful/readLocalizedField';
 import { dedupeEntryLinks } from '@/lib/utils/dedupeEntryLinks';
+import { contentfulService } from '@/services/contentfulService';
 
 function toLink(id: string): EntryLink {
   return { sys: { type: 'Link', linkType: 'Entry', id } };
@@ -25,14 +26,6 @@ function readEntryLabel(entry: any, locale: string): string {
   const platform = readLocalizedField(entry?.fields?.platform, locale);
   if (platform.trim()) return platform;
   return entry?.sys?.id ?? '';
-}
-
-async function fetchEntriesByType(managementApiRoot: string, contentTypeId: string, limit: number) {
-  const q = new URLSearchParams({ contentType: contentTypeId, limit: String(limit), skip: '0' });
-  const res = await fetch(`${managementApiRoot}/entries?${q}`, { cache: 'no-store' });
-  const data = (await res.json()) as any;
-  if (!res.ok) throw new Error(data?.error || 'Failed to load entries');
-  return (data.items || []) as any[];
 }
 
 const DEFAULT_TYPE_LABEL: Record<string, string> = {
@@ -61,7 +54,7 @@ export function EntryReferenceMultiTypeSelect(props: {
     sourceContentTypeIds,
     entryLocale,
     typeLabels,
-    searchPlaceholder = 'Buscar…',
+  searchPlaceholder = 'Search…',
     emptyListHint = 'No hay coincidencias.',
   } = props;
 
@@ -86,9 +79,10 @@ export function EntryReferenceMultiTypeSelect(props: {
     let cancelled = false;
     (async () => {
       try {
+        const space = contentfulService.inferSpaceFromManagementApiRoot(managementApiRoot);
         const chunks = await Promise.all(
           sourceContentTypeIds.map(async (ctId) => {
-            const items = await fetchEntriesByType(managementApiRoot, ctId, 500);
+            const items = await contentfulService.getEntriesCached({ space, contentTypeId: ctId });
             return items.map((entry) => ({ entry, contentTypeId: ctId } as Row));
           }),
         );
