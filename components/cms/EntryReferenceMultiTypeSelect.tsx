@@ -3,12 +3,11 @@
 import * as React from 'react';
 import { Input } from '@/components/ui/input';
 import { ScrollArea } from '@/components/ui/scroll-area';
-import { Badge } from '@/components/ui/badge';
-import { X } from 'lucide-react';
 import type { EntryLink } from '@/components/cms/EntryReferenceMultiSelect';
 import { readLocalizedField } from '@/lib/contentful/readLocalizedField';
 import { dedupeEntryLinks } from '@/lib/utils/dedupeEntryLinks';
 import { contentfulService } from '@/services/contentfulService';
+import { cn } from '@/lib/utils';
 
 function toLink(id: string): EntryLink {
   return { sys: { type: 'Link', linkType: 'Entry', id } };
@@ -43,6 +42,8 @@ export function EntryReferenceMultiTypeSelect(props: {
   managementApiRoot?: string;
   sourceContentTypeIds: string[];
   entryLocale: string;
+  fullWidth?: boolean;
+  halfWidthSearch?: boolean;
   typeLabels?: Record<string, string>;
   searchPlaceholder?: string;
   emptyListHint?: string;
@@ -53,6 +54,8 @@ export function EntryReferenceMultiTypeSelect(props: {
     managementApiRoot = '/api/contentful',
     sourceContentTypeIds,
     entryLocale,
+    fullWidth = false,
+    halfWidthSearch = false,
     typeLabels,
   searchPlaceholder = 'Search…',
     emptyListHint = 'No hay coincidencias.',
@@ -99,14 +102,6 @@ export function EntryReferenceMultiTypeSelect(props: {
     };
   }, [managementApiRoot, sourceContentTypeIds]);
 
-  const metaById = React.useMemo(() => {
-    const m: Record<string, { label: string; contentTypeId: string }> = {};
-    for (const { entry, contentTypeId } of rows) {
-      m[entry.sys.id] = { label: readEntryLabel(entry, entryLocale), contentTypeId };
-    }
-    return m;
-  }, [rows, entryLocale]);
-
   const selectedIds = React.useMemo(() => new Set(normalizedValue.map((l) => l.sys.id)), [normalizedValue]);
 
   const filtered = React.useMemo(() => {
@@ -128,83 +123,77 @@ export function EntryReferenceMultiTypeSelect(props: {
     [normalizedValue, safeOnChange],
   );
 
-  const remove = React.useCallback(
-    (id: string) => {
-      safeOnChange(normalizedValue.filter((l) => l.sys.id !== id));
-    },
-    [normalizedValue, safeOnChange],
-  );
-
   return (
     <div className="grid gap-2">
-      <div className="flex min-h-9 flex-wrap gap-2">
-        {normalizedValue.length === 0 ? (
-          <span className="text-xs text-zinc-500">Ninguno seleccionado.</span>
-        ) : (
-          normalizedValue.map((l, idx) => {
-            const meta = metaById[l.sys.id];
-            const lab = meta?.label ?? l.sys.id;
-            const tl = meta ? typeLabel(meta.contentTypeId) : '';
-            return (
-              <Badge key={`${l.sys.id}-${idx}`} variant="secondary" className="gap-1 pr-1 font-normal">
-                {tl ? (
-                  <span className="rounded bg-zinc-300/80 px-1 text-[10px] font-medium text-zinc-800">{tl}</span>
-                ) : null}
-                <span className="max-w-[200px] truncate">{lab}</span>
-                <button
-                  type="button"
-                  className="rounded p-0.5 text-zinc-600 hover:bg-zinc-200 hover:text-zinc-900"
-                  aria-label={`Quitar ${lab}`}
-                  onClick={() => remove(l.sys.id)}
-                >
-                  <X className="h-3.5 w-3.5" />
-                </button>
-              </Badge>
-            );
-          })
+      <Input
+        value={query}
+        onChange={(e) => setQuery(e.target.value)}
+        placeholder={searchPlaceholder}
+        className={cn(
+          fullWidth ? 'w-full' : 'w-60 max-w-full',
+          halfWidthSearch && 'w-full md:w-1/2',
         )}
-      </div>
-
-      <Input value={query} onChange={(e) => setQuery(e.target.value)} placeholder={searchPlaceholder} />
+      />
 
       {loadError ? <p className="text-xs text-red-600">{loadError}</p> : null}
 
-      <ScrollArea className="h-52 border border-neutral-200">
-        <div className="p-1">
-          {filtered.length === 0 ? (
-            <p className="px-4 py-6 text-center text-xs text-zinc-500">{emptyListHint}</p>
-          ) : (
-            filtered.map(({ entry, contentTypeId }) => {
-              const id = entry.sys.id as string;
-              const active = selectedIds.has(id);
-              const lab = readEntryLabel(entry, entryLocale);
-              const tl = typeLabel(contentTypeId);
-              return (
-                <button
-                  key={`${contentTypeId}-${id}`}
-                  type="button"
-                  onClick={() => toggle(id)}
-                  className={[
-                    'flex w-full items-center gap-2 rounded-md px-4 py-4 text-left text-sm transition',
-                    active ? 'bg-zinc-900 text-white' : 'text-zinc-800 hover:bg-zinc-100',
-                  ].join(' ')}
-                >
-                  <span
+      <div
+        className={cn(
+          'w-full min-w-0',
+          fullWidth ? 'max-w-none' : 'md:w-3/4',
+        )}
+      >
+        <ScrollArea className="h-[50vh]">
+          <div className="flex flex-col gap-1 pr-4">
+            {filtered.length === 0 ? (
+              <p className="py-6 text-center text-xs text-zinc-500">{emptyListHint}</p>
+            ) : (
+              filtered.map(({ entry, contentTypeId }) => {
+                const id = entry.sys.id as string;
+                const active = selectedIds.has(id);
+                const lab = readEntryLabel(entry, entryLocale);
+                const tl = typeLabel(contentTypeId);
+                return (
+                  <button
+                    key={`${contentTypeId}-${id}`}
+                    type="button"
+                    aria-pressed={active}
+                    onClick={() => toggle(id)}
                     className={[
-                      'shrink-0 rounded px-1.5 py-0.5 text-[10px] font-medium',
-                      active ? 'bg-white/20 text-white' : 'bg-zinc-200 text-zinc-700',
+                      'flex h-14 w-full shrink-0 items-center gap-3 rounded-md border px-3 text-left text-sm transition',
+                      active
+                        ? 'border-transparent bg-zinc-200 text-zinc-900'
+                        : 'border-neutral-200 text-zinc-800 hover:bg-zinc-50',
                     ].join(' ')}
                   >
-                    {tl}
-                  </span>
-                  <span className="min-w-0 flex-1 truncate font-medium">{lab || id}</span>
-                  <span className="shrink-0 font-mono text-[10px] opacity-70">{active ? '✓' : '+'}</span>
-                </button>
-              );
-            })
-          )}
-        </div>
-      </ScrollArea>
+                    <input
+                      type="checkbox"
+                      checked={active}
+                      readOnly
+                      tabIndex={-1}
+                      aria-hidden="true"
+                      className="pointer-events-none h-4 w-4 shrink-0 rounded border-zinc-400 accent-zinc-700"
+                    />
+                    <span
+                      className={[
+                        'inline-flex h-8 shrink-0 items-center rounded-md border bg-transparent px-3 text-sm font-medium',
+                        active
+                          ? 'border-zinc-500 text-zinc-900'
+                          : 'border-neutral-300 text-zinc-800',
+                      ].join(' ')}
+                    >
+                      {tl}
+                    </span>
+                    <span className="line-clamp-2 min-w-0 flex-1 whitespace-normal wrap-break-word text-left leading-snug font-medium">
+                      {lab || id}
+                    </span>
+                  </button>
+                );
+              })
+            )}
+          </div>
+        </ScrollArea>
+      </div>
     </div>
   );
 }

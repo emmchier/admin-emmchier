@@ -1,9 +1,17 @@
 'use client';
 
 import * as React from 'react';
-import { Sheet, SheetContent, SheetHeader, SheetTitle } from '@/components/ui/sheet';
+import {
+  Sheet,
+  SheetContent,
+  SheetHeader,
+  SheetScrollBody,
+  SheetTitle,
+} from '@/components/ui/sheet';
 import { EntryEditor, type EntryEditorLabels, type EntryEditorMode } from '@/components/cms/EntryEditor';
 import type { ArtActions } from '@/components/dashboard/art/ArtDashboard';
+import { ConfirmDiscardDialog } from '@/components/ui/ConfirmDiscardDialog';
+import { useProjectEditorStore } from '@/lib/stores/projectEditorStore';
 
 const HUB_MANAGEMENT_API = '/api/contentful/hub';
 
@@ -72,13 +80,31 @@ export function HubEntrySideSheet(props: HubEntrySideSheetProps) {
     };
   }, [actions, onMutated]);
 
+  const isDirty = useProjectEditorStore((s) => s.isDirty);
+  const [confirmDiscardOpen, setConfirmDiscardOpen] = React.useState(false);
+
+  const requestClose = React.useCallback(() => {
+    if (isDirty) {
+      setConfirmDiscardOpen(true);
+      return;
+    }
+    onOpenChange(false);
+  }, [isDirty, onOpenChange]);
+
   return (
-    <Sheet open={open} onOpenChange={onOpenChange}>
+    <>
+      <Sheet
+        open={open}
+        onOpenChange={(nextOpen) => {
+          if (nextOpen) onOpenChange(true);
+          else requestClose();
+        }}
+      >
       <SheetContent side="right" className="w-full sm:max-w-2xl">
-        <SheetHeader className="shrink-0 border-b border-neutral-200">
+        <SheetHeader>
           <SheetTitle className="text-base">{title}</SheetTitle>
         </SheetHeader>
-        <div className="flex h-full min-h-0 flex-1 flex-col pt-6">
+        <SheetScrollBody className="pt-4">
           <EntryEditor
             contentTypeId={contentTypeId}
             entryLocale={entryLocale}
@@ -88,7 +114,7 @@ export function HubEntrySideSheet(props: HubEntrySideSheetProps) {
             mode={mode}
             entryId={entryId}
             displayTitleFieldId={displayTitleFieldId}
-            onBack={() => onOpenChange(false)}
+            onBack={requestClose}
             onCreated={(id) => {
               onMutated?.();
               onCreated?.(id);
@@ -100,9 +126,23 @@ export function HubEntrySideSheet(props: HubEntrySideSheetProps) {
               onOpenChange(false);
             }}
           />
-        </div>
+        </SheetScrollBody>
       </SheetContent>
-    </Sheet>
+      </Sheet>
+
+      <ConfirmDiscardDialog
+        open={confirmDiscardOpen}
+        onOpenChange={(o) => !o && setConfirmDiscardOpen(false)}
+        title="Discard changes?"
+        description="You have unsaved changes. If you close now, they will be lost."
+        discardLabel="Discard and close"
+        cancelLabel="Keep editing"
+        onDiscard={() => {
+          setConfirmDiscardOpen(false);
+          onOpenChange(false);
+        }}
+      />
+    </>
   );
 }
 

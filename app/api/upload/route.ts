@@ -3,7 +3,7 @@ import type { PlainClientAPI } from 'contentful-management';
 import { NextResponse } from 'next/server';
 import path from 'node:path';
 import sharp from 'sharp';
-import { getContentfulEnv, getEntryLocale, getImageAssetContentTypeId } from '@/lib/contentful-env';
+import { getContentfulEnv, getEntryLocale, getImageAssetWrapperContentTypeId } from '@/lib/contentful-env';
 import { isSpaceId } from '@/lib/spaces';
 import type { SpaceId } from '@/lib/spaces';
 import { getClientsFor } from '@/lib/contentful/clients';
@@ -199,13 +199,13 @@ export async function POST(req: Request) {
     const { title, alt } = meta;
     let assetId: string;
     let cdnUrl: string;
-    let entryId: string;
+    let entryId: string | null = null;
 
     try {
       const { spaceId, environmentId } = getContentfulEnv(space);
       const originalFileName = file.name;
       const entryLocale = getEntryLocale();
-      const imageAssetTypeId = getImageAssetContentTypeId();
+      const wrapperContentTypeId = getImageAssetWrapperContentTypeId(space);
 
       const client = getClientsFor(space).managementClient;
 
@@ -268,37 +268,39 @@ export async function POST(req: Request) {
       assetId = publishedAsset.sys.id;
       cdnUrl = getPublishedFileUrl(publishedAsset);
 
-      const baseSlug = slugify(title || originalFileName);
-      const uniqueSlug = await ensureUniqueSlug({
-        client,
-        spaceId,
-        environmentId,
-        contentTypeId: imageAssetTypeId,
-        baseSlug,
-      });
+      if (wrapperContentTypeId) {
+        const baseSlug = slugify(title || originalFileName);
+        const uniqueSlug = await ensureUniqueSlug({
+          client,
+          spaceId,
+          environmentId,
+          contentTypeId: wrapperContentTypeId,
+          baseSlug,
+        });
 
-      const draftEntry = await client.entry.create(
-        { spaceId, environmentId, contentTypeId: imageAssetTypeId },
-        {
-          fields: {
-            title: { [entryLocale]: title },
-            alt: { [entryLocale]: alt },
-            slug: { [entryLocale]: uniqueSlug },
-            image: {
-              [entryLocale]: {
-                sys: { type: 'Link', linkType: 'Asset', id: assetId },
+        const draftEntry = await client.entry.create(
+          { spaceId, environmentId, contentTypeId: wrapperContentTypeId },
+          {
+            fields: {
+              title: { [entryLocale]: title },
+              alt: { [entryLocale]: alt },
+              slug: { [entryLocale]: uniqueSlug },
+              image: {
+                [entryLocale]: {
+                  sys: { type: 'Link', linkType: 'Asset', id: assetId },
+                },
               },
             },
           },
-        },
-      );
+        );
 
-      const publishedEntry = await client.entry.publish(
-        { spaceId, environmentId, entryId: draftEntry.sys.id },
-        draftEntry,
-      );
+        const publishedEntry = await client.entry.publish(
+          { spaceId, environmentId, entryId: draftEntry.sys.id },
+          draftEntry,
+        );
 
-      entryId = publishedEntry.sys.id;
+        entryId = publishedEntry.sys.id;
+      }
     } catch (contentfulError) {
       console.error('Contentful upload failed:', contentfulError);
       if (

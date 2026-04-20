@@ -57,6 +57,7 @@ type ContentfulStoreActions = {
   upsertCategory: (entry: CategoryEntry) => void;
   upsertNavigationGroup: (entry: NavigationGroupEntry) => void;
   upsertTech: (entry: TechEntry) => void;
+  remove: (model: ContentfulModelName, entryId: string) => void;
 
   /** True after the corresponding `set*` has run at least once (including empty payloads). */
   isModelLoaded: (modelName: ContentfulModelName) => boolean;
@@ -134,6 +135,26 @@ export const useContentfulStore = create<ContentfulStore>((set, get) => ({
     set((s) => ({
       techs: { ...s.techs, [entry.sys.id]: entry },
     })),
+
+  remove: (model, entryId) =>
+    set((s) => {
+      const del = <T extends Record<string, any>>(rec: T) => {
+        if (!rec[entryId]) return rec;
+        const next = { ...rec };
+        delete (next as any)[entryId];
+        return next;
+      };
+      switch (model) {
+        case 'project':
+          return { projects: del(s.projects) };
+        case 'category':
+          return { categories: del(s.categories) };
+        case 'navigationGroup':
+          return { navigationGroups: del(s.navigationGroups) };
+        case 'tech':
+          return { techs: del(s.techs) };
+      }
+    }),
 
   isModelLoaded: (modelName) => get().loadedModels[modelName],
 

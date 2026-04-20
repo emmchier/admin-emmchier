@@ -58,7 +58,7 @@ export function RootCms(props: RootCmsProps) {
   const loadHubTab = React.useCallback(async (tab: HubTab, opts?: { force?: boolean }) => {
     const force = Boolean(opts?.force);
     if (tab === 'contacts') {
-      await contentfulService.getEntriesCached({ space: 'hub', contentTypeId: 'contact', force });
+      await contentfulService.getEntriesCached({ space: 'hub', contentTypeId: 'socialNetwork', force });
       return;
     }
     if (tab === 'resume') {

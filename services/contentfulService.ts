@@ -301,9 +301,28 @@ export const contentfulService = {
   async getImageAssetPreviews(args: { space: SpaceId; entryIds: string[] }) {
     const { space, entryIds } = args;
     const ids = entryIds.map((s) => s.trim()).filter(Boolean).slice(0, 100);
-    if (ids.length === 0) return [] as Array<{ entryId: string; url: string | null; title: string | null; assetId: string | null }>;
+    if (ids.length === 0)
+      return [] as Array<{
+        entryId: string;
+        url: string | null;
+        title: string | null;
+        assetId: string | null;
+        width: number | null;
+        height: number | null;
+        extension: string | null;
+        mimeType: string | null;
+      }>;
     const data = await fetchJson(`${baseFor(space)}/image-assets?ids=${encodeURIComponent(ids.join(','))}`);
-    return (data?.items ?? []) as Array<{ entryId: string; url: string | null; title: string | null; assetId: string | null }>;
+    return (data?.items ?? []) as Array<{
+      entryId: string;
+      url: string | null;
+      title: string | null;
+      assetId: string | null;
+      width: number | null;
+      height: number | null;
+      extension: string | null;
+      mimeType: string | null;
+    }>;
   },
 
   async ensureArtModelLoaded(model: 'project' | 'category' | 'navigationGroup' | 'tech', options?: { force?: boolean }) {

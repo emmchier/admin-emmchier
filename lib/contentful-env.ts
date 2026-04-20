@@ -34,8 +34,35 @@ export function getContentfulEnv(space: SpaceId): ContentfulEnv {
   return { spaceId, environmentId };
 }
 
+function isInvalidContentTypeId(raw: string | undefined): boolean {
+  const t = raw?.trim();
+  if (!t) return true;
+  if (/^doesnotexist$/i.test(t)) return true;
+  return false;
+}
+
+/**
+ * Content type for the optional “image wrapper” entry (slug + link to Asset) after upload.
+ * - **hub**: default `null` — only the Asset is created (resume/social link the Asset directly).
+ *   Set `CONTENTFUL_HUB_IMAGE_ASSET_CONTENT_TYPE_ID` if your Hub space uses a wrapper model.
+ * - **art / design**: defaults to `imageAsset` unless `CONTENTFUL_IMAGE_ASSET_CONTENT_TYPE_ID` overrides.
+ */
+export function getImageAssetWrapperContentTypeId(space: SpaceId): string | null {
+  if (space === 'hub') {
+    const hub = process.env.CONTENTFUL_HUB_IMAGE_ASSET_CONTENT_TYPE_ID;
+    if (!isInvalidContentTypeId(hub)) return hub!.trim();
+    return null;
+  }
+  const global = process.env.CONTENTFUL_IMAGE_ASSET_CONTENT_TYPE_ID;
+  if (!isInvalidContentTypeId(global)) return global!.trim();
+  return 'imageAsset';
+}
+
+/** @deprecated Prefer `getImageAssetWrapperContentTypeId('art')` for space-aware behavior. */
 export function getImageAssetContentTypeId(): string {
-  return process.env.CONTENTFUL_IMAGE_ASSET_CONTENT_TYPE_ID ?? 'imageAsset';
+  const global = process.env.CONTENTFUL_IMAGE_ASSET_CONTENT_TYPE_ID;
+  if (!isInvalidContentTypeId(global)) return global!.trim();
+  return 'imageAsset';
 }
 
 export function getEntryLocale(): string {

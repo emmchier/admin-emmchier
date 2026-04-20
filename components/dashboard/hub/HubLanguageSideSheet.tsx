@@ -1,7 +1,14 @@
 'use client';
 
 import * as React from 'react';
-import { Sheet, SheetContent, SheetHeader, SheetTitle, SheetFooter } from '@/components/ui/sheet';
+import {
+  Sheet,
+  SheetContent,
+  SheetFooter,
+  SheetHeader,
+  SheetScrollBody,
+  SheetTitle,
+} from '@/components/ui/sheet';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
@@ -12,6 +19,7 @@ import { fetchEntry, fetchFirstResumeId, mergeLink, unwrapLocaleCell } from '@/c
 import { upsertHubEntryFromManagementApi } from '@/lib/store/syncHubEntryFromManagement';
 import { useHubStore } from '@/lib/store/hubStore';
 import { ConfirmDeleteDialog } from '@/components/ui/ConfirmDeleteDialog';
+import { ConfirmDiscardDialog } from '@/components/ui/ConfirmDiscardDialog';
 
 type Draft = {
   nameEn: string;
@@ -43,11 +51,14 @@ export function HubLanguageSideSheet(props: {
     levelEn: '',
     levelEs: '',
   }));
+  const baselineRef = React.useRef<Draft>({ nameEn: '', nameEs: '', levelEn: '', levelEs: '' });
+  const [confirmDiscardOpen, setConfirmDiscardOpen] = React.useState(false);
 
   React.useEffect(() => {
     if (!open) return;
     if (mode !== 'create') return;
     setDraft({ nameEn: '', nameEs: '', levelEn: '', levelEs: '' });
+    baselineRef.current = { nameEn: '', nameEs: '', levelEn: '', levelEs: '' };
     setError(null);
   }, [mode, open]);
 
@@ -79,12 +90,14 @@ export function HubLanguageSideSheet(props: {
         const item = await fetchEntry(entryId);
         if (cancelled) return;
         const f = (item?.fields ?? {}) as Record<string, unknown>;
-        setDraft({
+        const nextDraft = {
           nameEn: readLocalizedField(f.nameEn, entryLocale),
           nameEs: readLocalizedField(f.nameEs, entryLocale),
           levelEn: readLocalizedField(f.levelEn, entryLocale),
           levelEs: readLocalizedField(f.levelEs, entryLocale),
-        });
+        };
+        baselineRef.current = nextDraft;
+        setDraft(nextDraft);
       } catch (e) {
         if (!cancelled) setError(e instanceof Error ? e.message : 'Failed to load language');
       } finally {
@@ -97,6 +110,16 @@ export function HubLanguageSideSheet(props: {
   }, [entryId, entryLocale, mode, open]);
 
   const title = mode === 'create' ? 'New Language' : 'Edit Language';
+  const isDirty = JSON.stringify(draft) !== JSON.stringify(baselineRef.current);
+
+  const requestClose = React.useCallback(() => {
+    if (busy) return;
+    if (isDirty) {
+      setConfirmDiscardOpen(true);
+      return;
+    }
+    onOpenChange(false);
+  }, [busy, isDirty, onOpenChange]);
 
   const save = React.useCallback(async () => {
     if (busy) return;
@@ -160,14 +183,20 @@ export function HubLanguageSideSheet(props: {
   }, [actions, busy, entryId, onMutated, onOpenChange]);
 
   return (
-    <Sheet open={open} onOpenChange={onOpenChange}>
+    <>
+      <Sheet
+        open={open}
+        onOpenChange={(nextOpen) => {
+          if (nextOpen) onOpenChange(true);
+          else requestClose();
+        }}
+      >
       <SheetContent side="right" className="w-full sm:max-w-2xl">
-        <SheetHeader className="shrink-0 border-b border-neutral-200">
+        <SheetHeader>
           <SheetTitle className="text-base">{title}</SheetTitle>
         </SheetHeader>
 
-        <div className="min-h-0 flex-1 overflow-auto">
-          <div className="p-4">
+        <SheetScrollBody className="pb-4 pt-2">
           {error ? <p className="mb-4 border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700">{error}</p> : null}
           {loadingEntry ? (
             <p className="flex items-center gap-2 text-sm text-neutral-500">
@@ -195,10 +224,9 @@ export function HubLanguageSideSheet(props: {
               </div>
             </div>
           )}
-          </div>
-        </div>
+        </SheetScrollBody>
 
-        <SheetFooter className="border-t border-neutral-200">
+        <SheetFooter>
           <div className="flex w-full items-center justify-between gap-2">
             <div className="flex items-center gap-2">
               {mode === 'edit' ? (
@@ -209,7 +237,7 @@ export function HubLanguageSideSheet(props: {
               ) : null}
             </div>
             <div className="flex items-center gap-2">
-              <Button type="button" variant="outline" onClick={() => onOpenChange(false)} disabled={busy}>
+              <Button type="button" variant="outline" onClick={requestClose} disabled={busy}>
                 <X className="mr-2 h-4 w-4" />
                 Close
               </Button>
@@ -230,7 +258,21 @@ export function HubLanguageSideSheet(props: {
         busy={busy}
         onConfirm={remove}
       />
-    </Sheet>
+      </Sheet>
+
+      <ConfirmDiscardDialog
+        open={confirmDiscardOpen}
+        onOpenChange={(o) => !o && setConfirmDiscardOpen(false)}
+        title="Discard changes?"
+        description="You have unsaved changes in this form. If you close now, they will be lost."
+        discardLabel="Discard and close"
+        cancelLabel="Keep editing"
+        onDiscard={() => {
+          setConfirmDiscardOpen(false);
+          onOpenChange(false);
+        }}
+      />
+    </>
   );
 }
 

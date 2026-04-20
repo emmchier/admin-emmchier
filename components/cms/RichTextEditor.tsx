@@ -1,6 +1,7 @@
 'use client';
 
 import * as React from 'react';
+import type { Editor } from '@tiptap/core';
 import { EditorContent, useEditor } from '@tiptap/react';
 import type { Document } from '@contentful/rich-text-types';
 import {
@@ -25,6 +26,7 @@ import { contentfulService } from '@/services/contentfulService';
 import { RICH_TEXT_MAX_CHARS } from '@/lib/contentful/contentfulTiptapBridge';
 import { getRichTextEditorExtensions } from '@/lib/contentful/richTextTiptapExtensions';
 import { enrichRichTextDocumentWithAssetUrls } from '@/lib/contentful/enrichRichTextAssetUrls';
+import { toast } from '@/hooks/use-toast';
 
 export type RichTextEditorProps = {
   /** Contentful Rich Text JSON (object) until the user edits; then session HTML string. */
@@ -77,7 +79,55 @@ export function RichTextEditor({
   const onChangeRef = React.useRef(onChange);
   onChangeRef.current = onChange;
 
+  const editorRef = React.useRef<Editor | null>(null);
+  const managementApiRootRef = React.useRef(managementApiRoot);
+  managementApiRootRef.current = managementApiRoot;
+
   const [selectionTick, setSelectionTick] = React.useState(0);
+
+  /** Same `/api/upload` pipeline as gallery (Sharp → WebP, max width). Shared by toolbar, paste, and drop. */
+  const uploadImageFile = React.useCallback(async (file: File) => {
+    const ed = editorRef.current;
+    if (!ed || ed.isDestroyed || !file.type.startsWith('image/')) return;
+    const space =
+      contentfulService.inferSpaceFromManagementApiRoot(managementApiRootRef.current);
+    const form = new FormData();
+    form.set('file', file);
+    form.set('title', file.name.replace(/\.\w+$/, '') || 'image');
+    form.set('alt', file.name.replace(/\.\w+$/, '') || 'image');
+    const xhr = new XMLHttpRequest();
+    try {
+      const json = await new Promise<{ assetId?: string; url?: string; error?: string }>(
+        (resolve, reject) => {
+          xhr.open('POST', `/api/upload?space=${encodeURIComponent(space)}`);
+          xhr.responseType = 'json';
+          xhr.onload = () => {
+            if (xhr.status < 200 || xhr.status >= 300) {
+              reject(
+                new Error(
+                  (xhr.response as { error?: string })?.error || 'Upload failed'
+                )
+              );
+              return;
+            }
+            resolve(xhr.response as { assetId?: string; url?: string });
+          };
+          xhr.onerror = () => reject(new Error('Upload failed'));
+          xhr.send(form);
+        }
+      );
+      const previewSrc = typeof json.url === 'string' ? json.url : '';
+      if (!previewSrc) return;
+      ed.chain().focus().setImage({ src: previewSrc }).run();
+    } catch (e) {
+      const message = e instanceof Error ? e.message : 'Upload failed';
+      toast({
+        variant: 'destructive',
+        title: 'No se pudo subir la imagen',
+        description: message,
+      });
+    }
+  }, []);
 
   const editor = useEditor({
     immediatelyRender: false,
@@ -85,9 +135,39 @@ export function RichTextEditor({
     content: mountHtmlRef.current ?? '<p></p>',
     editable: !disabled,
     editorProps: {
+      handlePaste: (_view, event) => {
+        const items = event.clipboardData?.items;
+        if (!items) return false;
+        for (let i = 0; i < items.length; i += 1) {
+          const item = items[i];
+          if (item.kind === 'file' && item.type.startsWith('image/')) {
+            const file = item.getAsFile();
+            if (file) {
+              event.preventDefault();
+              void uploadImageFile(file);
+              return true;
+            }
+          }
+        }
+        return false;
+      },
+      handleDrop: (_view, event, _slice, moved) => {
+        if (moved) return false;
+        const files = event.dataTransfer?.files;
+        if (!files?.length) return false;
+        const images = Array.from(files).filter((f) => f.type.startsWith('image/'));
+        if (images.length === 0) return false;
+        event.preventDefault();
+        void (async () => {
+          for (const f of images) {
+            await uploadImageFile(f);
+          }
+        })();
+        return true;
+      },
       attributes: {
         class: cn(
-          'min-h-[200px] px-3 py-2 text-sm text-neutral-900 outline-none',
+          'min-h-[200px] px-3 py-2 text-[18px] text-neutral-900 outline-none',
           'focus:outline-none',
           '[&_p]:my-2 [&_p]:leading-relaxed',
           '[&_h1]:my-3 [&_h1]:text-2xl [&_h1]:font-semibold [&_h1]:leading-tight',
@@ -189,41 +269,12 @@ export function RichTextEditor({
     };
   }, [editor, setSelectionTick]);
 
-  const insertImageFromUpload = React.useCallback(
-    async (file: File) => {
-      if (!editor || !file.type.startsWith('image/')) return;
-      const space =
-        contentfulService.inferSpaceFromManagementApiRoot(managementApiRoot);
-      const form = new FormData();
-      form.set('file', file);
-      form.set('title', file.name.replace(/\.\w+$/, '') || 'image');
-      form.set('alt', file.name.replace(/\.\w+$/, '') || 'image');
-      const xhr = new XMLHttpRequest();
-      const json = await new Promise<{ assetId?: string; url?: string }>(
-        (resolve, reject) => {
-          xhr.open('POST', `/api/upload?space=${encodeURIComponent(space)}`);
-          xhr.responseType = 'json';
-          xhr.onload = () => {
-            if (xhr.status < 200 || xhr.status >= 300) {
-              reject(
-                new Error(
-                  (xhr.response as { error?: string })?.error || 'Upload failed'
-                )
-              );
-              return;
-            }
-            resolve(xhr.response as { assetId?: string; url?: string });
-          };
-          xhr.onerror = () => reject(new Error('Upload failed'));
-          xhr.send(form);
-        }
-      );
-      const previewSrc = typeof json.url === 'string' ? json.url : '';
-      if (!previewSrc) return;
-      editor.chain().focus().setImage({ src: previewSrc }).run();
-    },
-    [editor, managementApiRoot]
-  );
+  React.useEffect(() => {
+    if (editor) editorRef.current = editor;
+    return () => {
+      editorRef.current = null;
+    };
+  }, [editor]);
 
   const charCount = editor?.getText().length ?? 0;
 
@@ -280,7 +331,7 @@ export function RichTextEditor({
         onChange={(e) => {
           const f = e.target.files?.[0];
           e.target.value = '';
-          if (f) void insertImageFromUpload(f);
+          if (f) void uploadImageFile(f);
         }}
       />
       {editor ? (
@@ -290,10 +341,10 @@ export function RichTextEditor({
               value={blockStyleSelectValue}
               onChange={onBlockStyleChange}
               disabled={disabled}
-              className="h-8 min-w-[148px] max-w-[min(220px,40vw)] rounded-md border border-neutral-200 bg-white px-2 text-xs font-medium text-neutral-800 shadow-sm"
+              className="h-8 min-w-[148px] max-w-[min(220px,40vw)] rounded-md border border-neutral-200 bg-white pl-3 pr-8 text-xs font-medium text-neutral-800"
               aria-label="Estilo de párrafo o encabezado"
             >
-              <option value="paragraph">Normal</option>
+              <option value="paragraph">Paragraph</option>
               {[1, 2, 3, 4, 5, 6].map((level) => (
                 <option key={level} value={`h${level}`}>
                   Heading {level}

@@ -69,6 +69,12 @@ export function CategoryDashboard(props: {
           refreshingLabel="Refreshing…"
           onNew={goCreate}
           onEdit={goEdit}
+          onDeleteMany={async (ids) => {
+            for (const id of ids) {
+              await actions.deleteEntryAction(id);
+              useContentfulStore.getState().remove('category', id);
+            }
+          }}
         />
       ) : (
         <div className="flex min-h-0 flex-1 flex-col">

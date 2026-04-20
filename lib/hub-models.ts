@@ -1,7 +1,7 @@
 export type HubTab = 'contacts' | 'resume';
 
 export const HUB_TAB_LABELS: Record<HubTab, string> = {
-  contacts: 'Contacts',
+  contacts: 'Social Networks',
   resume: 'Resumé',
 };
 

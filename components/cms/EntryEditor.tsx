@@ -10,7 +10,6 @@ import {
   TooltipTrigger,
 } from '@/components/ui/tooltip';
 import { SchemaDrivenEntryForm } from '@/components/cms/SchemaDrivenEntryForm';
-import { ScrollArea } from '@/components/ui/scroll-area';
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -47,6 +46,7 @@ import { useProjectUnsavedNavigationGuard } from '@/lib/stores/projectUnsavedNav
 import { cn } from '@/lib/utils';
 import { normalizeRichTextFieldsForSave } from '@/lib/contentful/normalizeRichTextFieldsForSave';
 import { sanitizeArtProjectTechLinksForSave } from '@/lib/contentful/sanitizeArtProjectTechLinksForSave';
+import { derivePlatformFromUrlInput, validateSocialUrl } from '@/lib/url/socialUrl';
 
 const contentTypeCache = new Map<string, any>();
 const contentTypeInflight = new Map<string, Promise<any>>();
@@ -165,6 +165,11 @@ export function EntryEditor(props: EntryEditorProps) {
     prefetchedEntry,
   } = props;
 
+  const contentColClass =
+    contentTypeId === 'socialNetwork'
+      ? 'col-span-12'
+      : 'col-span-12 lg:col-start-3 lg:col-span-8';
+
   const labels = React.useMemo(
     () => ({ ...defaultLabelsEn, ...labelsProp }),
     [labelsProp]
@@ -280,6 +285,16 @@ export function EntryEditor(props: EntryEditorProps) {
     publishIntent !== null &&
     publishIntent !== isEntryPublished(entry.sys)
   );
+
+  const socialUrlOk = React.useMemo(() => {
+    if (contentTypeId !== 'socialNetwork') return true;
+    const url =
+      currentData && typeof (currentData as any).url === 'string'
+        ? String((currentData as any).url)
+        : '';
+    if (!url.trim()) return false;
+    return validateSocialUrl(url).ok;
+  }, [contentTypeId, currentData]);
 
   React.useEffect(() => {
     useProjectUnsavedNavigationGuard.setState({
@@ -410,6 +425,7 @@ export function EntryEditor(props: EntryEditorProps) {
           entryId,
           liveTitle: headerLiveTitleRef.current,
         });
+        toast.success('Eliminado');
       } else {
         await actions.deleteEntryAction(entryId);
         toast.success('Eliminado');
@@ -511,6 +527,17 @@ export function EntryEditor(props: EntryEditorProps) {
         contentType,
         rawFields,
       ) as Record<string, any>;
+
+      if (contentTypeId === 'socialNetwork') {
+        const urlDisplay = typeof fields.url === 'string' ? fields.url : '';
+        const chk = validateSocialUrl(urlDisplay);
+        if (!chk.ok) {
+          toast.error('Invalid URL');
+          return;
+        }
+        fields.url = chk.normalized;
+        fields.platform = derivePlatformFromUrlInput(urlDisplay);
+      }
 
       if (contentTypeId === 'project') {
         const knownTechIds = new Set(
@@ -632,222 +659,249 @@ export function EntryEditor(props: EntryEditorProps) {
 
   return (
     <div className="grid h-full min-h-0 flex-1 grid-cols-12 bg-white">
-      <div className="col-span-12 flex min-h-0 flex-1 flex-col lg:col-start-3 lg:col-span-8">
-        <div className="shrink-0 border-b border-neutral-200 bg-white px-4 pb-4 pt-0">
-          <div className="flex flex-nowrap items-start justify-between gap-3">
-            <div className="flex min-w-0 flex-1 items-start gap-2">
-              <TooltipProvider delayDuration={300}>
-                <Tooltip>
-                  <TooltipTrigger asChild>
-                    <Button
-                      type="button"
-                      variant="outline"
-                      size="icon"
-                      onClick={() => requestNavigateGuard(onBack)}
-                      aria-label="Go back"
-                    >
-                      <ArrowLeft className="h-4 w-4" />
-                    </Button>
-                  </TooltipTrigger>
-                  <TooltipContent>Go back</TooltipContent>
-                </Tooltip>
-              </TooltipProvider>
-              <div className="min-w-0 flex-1">
-                <TooltipProvider delayDuration={400}>
-                  <Tooltip>
-                    <TooltipTrigger asChild>
-                      <h2 className="line-clamp-2 cursor-default wrap-break-word text-[20px] font-bold leading-tight text-neutral-900">
-                        {headerLiveTitle}
-                      </h2>
-                    </TooltipTrigger>
-                    <TooltipContent
-                      side="bottom"
-                      align="start"
-                      className="max-w-md whitespace-pre-wrap"
-                    >
-                      {headerLiveTitle}
-                    </TooltipContent>
-                  </Tooltip>
-                </TooltipProvider>
-                {mode === 'edit' && entryId ? (
-                  <div className="mt-1 flex items-center gap-2">
-                    <StatusBadge entry={badgeEntry ?? entry} />
+      <div className="col-span-12 flex min-h-0 flex-1 flex-col">
+        <div className="shrink-0 border-b border-neutral-200 bg-white">
+          <div className="w-full px-4 pb-4 pt-0 lg:px-0">
+            <div className="mx-auto grid w-full grid-cols-12">
+              <div className={contentColClass}>
+                <div className="flex flex-nowrap items-start justify-between gap-3">
+                  <div className="flex min-w-0 flex-1 flex-col gap-1">
+                    <div className="flex min-w-0 items-center gap-4">
+                      <TooltipProvider delayDuration={300}>
+                        <Tooltip>
+                          <TooltipTrigger asChild>
+                            <Button
+                              type="button"
+                              variant="outline"
+                              size="icon"
+                              className="h-9 w-9 shrink-0"
+                              onClick={() => requestNavigateGuard(onBack)}
+                              aria-label="Go back"
+                            >
+                              <ArrowLeft className="h-4 w-4" />
+                            </Button>
+                          </TooltipTrigger>
+                          <TooltipContent>Go back</TooltipContent>
+                        </Tooltip>
+                      </TooltipProvider>
+                      {mode === 'edit' && entryId ? (
+                        <StatusBadge entry={badgeEntry ?? entry} />
+                      ) : null}
+                      <TooltipProvider delayDuration={400}>
+                        <Tooltip>
+                          <TooltipTrigger asChild>
+                            <div className="min-w-0 flex-1">
+                              <h2 className="line-clamp-2 min-w-0 cursor-default wrap-break-word text-[20px] font-bold leading-tight text-neutral-900">
+                                {headerLiveTitle}
+                              </h2>
+                              {contentTypeId === 'navigationGroup' && mode === 'edit' ? (
+                                <p className="mt-1 truncate text-sm text-zinc-500">
+                                  {readLocalizedField((currentData as any)?.slug, entryLocale) ||
+                                    readLocalizedField(entry?.fields?.slug, entryLocale) ||
+                                    ''}
+                                </p>
+                              ) : null}
+                            </div>
+                          </TooltipTrigger>
+                          <TooltipContent
+                            side="bottom"
+                            align="start"
+                            className="max-w-md whitespace-pre-wrap"
+                          >
+                            {headerLiveTitle}
+                          </TooltipContent>
+                        </Tooltip>
+                      </TooltipProvider>
+                    </div>
+                    {mode === 'edit' && entryId ? null : (
+                      <p className="pl-[52px] text-sm text-zinc-500">
+                        {labels.createSubtitle}
+                      </p>
+                    )}
                   </div>
-                ) : (
-                  <p className="mt-1 text-sm text-zinc-500">
-                    {labels.createSubtitle}
-                  </p>
-                )}
-              </div>
-            </div>
 
-            <div className="flex shrink-0 flex-nowrap items-center gap-2">
-              {mode === 'edit' ? null : null}
+                  <div className="flex shrink-0 flex-nowrap items-center gap-2">
+                    {mode === 'edit' ? null : null}
 
-              {contentTypeId === 'project' && mode === 'edit' && entryId ? (
-                <Button
-                  type="button"
-                  variant="ghost"
-                  onClick={onRevert}
-                  disabled={(!isDirty && !publishDirty) || saving || busy}
-                >
-                  <Undo2 className="mr-2 h-4 w-4" />
-                  {labels.revert}
-                </Button>
-              ) : null}
-
-              <Button
-                type="button"
-                onClick={() => void save()}
-                disabled={(!isDirty && !publishDirty) || saving || busy}
-              >
-                {saving ? (
-                  <Loader2 className="mr-2 h-4 w-4 animate-spin" />
-                ) : null}
-                {labels.save}
-              </Button>
-
-              {mode === 'edit' ? (
-                <TooltipProvider>
-                  <Tooltip>
-                    <TooltipTrigger asChild>
+                    {contentTypeId === 'project' && mode === 'edit' && entryId ? (
                       <Button
                         type="button"
-                        variant="outline"
-                        size="icon"
-                        onClick={queuePublishToggle}
-                        disabled={!entryId || saving || busy}
-                        aria-label={
-                          displayPublished ? labels.unpublish : labels.publish
+                        variant="ghost"
+                        onClick={onRevert}
+                        disabled={
+                          (!isDirty && !publishDirty) || saving || busy
                         }
                       >
-                        {displayPublished ? (
-                          <Eye className="h-4 w-4" />
-                        ) : (
-                          <EyeOff className="h-4 w-4" />
-                        )}
-                        <span className="sr-only">
-                          {displayPublished ? labels.unpublish : labels.publish}
-                        </span>
+                        <Undo2 className="mr-2 h-4 w-4" />
+                        {labels.revert}
                       </Button>
-                    </TooltipTrigger>
-                    <TooltipContent>
-                      {displayPublished ? labels.unpublish : labels.publish}
-                    </TooltipContent>
-                  </Tooltip>
-                </TooltipProvider>
-              ) : null}
+                    ) : null}
 
-              {mode === 'edit' ? (
-                <>
-                  <DropdownMenu>
-                    <TooltipProvider>
-                      <Tooltip>
-                        <TooltipTrigger asChild>
-                          <DropdownMenuTrigger
-                            aria-label={labels.moreAria}
-                            className={buttonVariants({
-                              variant: 'ghost',
-                              size: 'icon',
-                            })}
-                          >
-                            <MoreVertical className="h-4 w-4" />
-                          </DropdownMenuTrigger>
-                        </TooltipTrigger>
-                        <TooltipContent>{labels.moreAria}</TooltipContent>
-                      </Tooltip>
-                    </TooltipProvider>
-                    <DropdownMenuContent align="end">
-                      <DropdownMenuItem
-                        variant="destructive"
-                        onClick={(e) => {
-                          e.preventDefault();
-                          setConfirmDeleteOpen(true);
-                        }}
-                      >
-                        {labels.deleteMenu}
-                      </DropdownMenuItem>
-                    </DropdownMenuContent>
-                  </DropdownMenu>
+                    <Button
+                      type="button"
+                      onClick={() => void save()}
+                      disabled={
+                        (!isDirty && !publishDirty) ||
+                        saving ||
+                        busy ||
+                        (contentTypeId === 'socialNetwork' && !socialUrlOk)
+                      }
+                    >
+                      {saving ? (
+                        <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                      ) : null}
+                      {labels.save}
+                    </Button>
 
-                  <AlertDialog
-                    open={confirmDeleteOpen}
-                    onOpenChange={setConfirmDeleteOpen}
-                  >
-                    <AlertDialogContent>
-                      <AlertDialogHeader>
-                        <AlertDialogTitle>
-                          {labels.deleteDialogTitle}
-                        </AlertDialogTitle>
-                        <AlertDialogDescription>
-                          {labels.deleteDialogDescription(headerLiveTitle)}
-                          <span className="mt-2 block font-medium text-zinc-900">
-                            {String(entryTitle || labels.untitled)}
-                          </span>
-                        </AlertDialogDescription>
-                      </AlertDialogHeader>
-                      <AlertDialogFooter>
-                        <AlertDialogCancel disabled={deleting}>
-                          {labels.cancel}
-                        </AlertDialogCancel>
-                        <AlertDialogAction
-                          onClick={(e) => {
-                            e.preventDefault();
-                            void onDelete();
-                          }}
-                          className="bg-red-600 hover:bg-red-600/90"
-                          disabled={deleting}
+                    {mode === 'edit' ? (
+                      <TooltipProvider>
+                        <Tooltip>
+                          <TooltipTrigger asChild>
+                            <Button
+                              type="button"
+                              variant="outline"
+                              size="icon"
+                              onClick={queuePublishToggle}
+                              disabled={!entryId || saving || busy}
+                              aria-label={
+                                displayPublished ? labels.unpublish : labels.publish
+                              }
+                            >
+                              {displayPublished ? (
+                                <Eye className="h-4 w-4" />
+                              ) : (
+                                <EyeOff className="h-4 w-4" />
+                              )}
+                              <span className="sr-only">
+                                {displayPublished
+                                  ? labels.unpublish
+                                  : labels.publish}
+                              </span>
+                            </Button>
+                          </TooltipTrigger>
+                          <TooltipContent>
+                            {displayPublished ? labels.unpublish : labels.publish}
+                          </TooltipContent>
+                        </Tooltip>
+                      </TooltipProvider>
+                    ) : null}
+
+                    {mode === 'edit' ? (
+                      <>
+                        <DropdownMenu>
+                          <TooltipProvider>
+                            <Tooltip>
+                              <TooltipTrigger asChild>
+                                <DropdownMenuTrigger
+                                  aria-label={labels.moreAria}
+                                  className={buttonVariants({
+                                    variant: 'outline',
+                                    size: 'icon',
+                                  })}
+                                >
+                                  <MoreVertical className="h-4 w-4" />
+                                </DropdownMenuTrigger>
+                              </TooltipTrigger>
+                              <TooltipContent>{labels.moreAria}</TooltipContent>
+                            </Tooltip>
+                          </TooltipProvider>
+                          <DropdownMenuContent align="end">
+                            <DropdownMenuItem
+                              variant="destructive"
+                              onClick={(e) => {
+                                e.preventDefault();
+                                setConfirmDeleteOpen(true);
+                              }}
+                            >
+                              {labels.deleteMenu}
+                            </DropdownMenuItem>
+                          </DropdownMenuContent>
+                        </DropdownMenu>
+
+                        <AlertDialog
+                          open={confirmDeleteOpen}
+                          onOpenChange={setConfirmDeleteOpen}
                         >
-                          {deleting ? (
-                            <Loader2 className="mr-2 h-4 w-4 animate-spin" />
-                          ) : null}
-                          {labels.deleteConfirm}
-                        </AlertDialogAction>
-                      </AlertDialogFooter>
-                    </AlertDialogContent>
-                  </AlertDialog>
-                </>
-              ) : null}
+                          <AlertDialogContent>
+                            <AlertDialogHeader>
+                              <AlertDialogTitle>
+                                {labels.deleteDialogTitle}
+                              </AlertDialogTitle>
+                              <AlertDialogDescription>
+                                {labels.deleteDialogDescription(headerLiveTitle)}
+                              </AlertDialogDescription>
+                            </AlertDialogHeader>
+                            <AlertDialogFooter>
+                              <AlertDialogCancel disabled={deleting}>
+                                {labels.cancel}
+                              </AlertDialogCancel>
+                              <AlertDialogAction
+                                onClick={(e) => {
+                                  e.preventDefault();
+                                  void onDelete();
+                                }}
+                                className="bg-red-600 hover:bg-red-600/90"
+                                disabled={deleting}
+                              >
+                                {deleting ? (
+                                  <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                                ) : null}
+                                {labels.deleteConfirm}
+                              </AlertDialogAction>
+                            </AlertDialogFooter>
+                          </AlertDialogContent>
+                        </AlertDialog>
+                      </>
+                    ) : null}
+                  </div>
+                </div>
+              </div>
             </div>
           </div>
         </div>
-        <div className="flex min-h-0 flex-1 flex-col pb-4 pt-0">
-          <ScrollArea className="min-h-0 flex-1 bg-white">
-            <div
-              className={cn(
-                'px-4 pb-[72px] pt-6',
-                contentTypeId === 'project' ? 'space-y-8' : 'space-y-4'
-              )}
-            >
-              {error ? (
-                <p className="border border-red-200 bg-red-50 px-4 py-4 text-sm text-red-700">
-                  {error}
-                </p>
-              ) : null}
 
-              {busy || !contentType ? (
-                <p className="text-sm text-zinc-500">{labels.loading}</p>
-              ) : (
-                <SchemaDrivenEntryForm
-                  contentType={contentType}
-                  locale={entryLocale}
-                  entryId={entryId}
-                  contentfulSpaceId={contentfulSpaceId}
-                  managementApiRoot={managementApiRoot}
-                  initialFields={entry?.fields}
-                  formHydrationKey={formHydrationKey}
-                  submitLabel={
-                    mode === 'create' ? labels.createSubmit : labels.save
-                  }
-                  onSubmit={schemaFormSubmit}
-                  hideHeader
-                  hideSubmit
-                />
-              )}
+        <div className="min-h-0 min-w-0 flex-1 overflow-y-auto overflow-x-hidden bg-white">
+          <div className="w-full px-4 lg:px-0">
+            <div className="mx-auto grid w-full grid-cols-12">
+              <div className={contentColClass + ' min-w-0'}>
+                <div
+                  className={cn(
+                    'pb-[72px] pt-6',
+                    contentTypeId === 'project' ? 'space-y-8' : 'space-y-4',
+                  )}
+                >
+                  {error ? (
+                    <p className="border border-red-200 bg-red-50 px-4 py-4 text-sm text-red-700">
+                      {error}
+                    </p>
+                  ) : null}
+
+                  {busy || !contentType ? (
+                    <p className="text-sm text-zinc-500">{labels.loading}</p>
+                  ) : (
+                    <SchemaDrivenEntryForm
+                      contentType={contentType}
+                      locale={entryLocale}
+                      entryId={entryId}
+                      contentfulSpaceId={contentfulSpaceId}
+                      managementApiRoot={managementApiRoot}
+                      initialFields={entry?.fields}
+                      formHydrationKey={formHydrationKey}
+                      submitLabel={
+                        mode === 'create' ? labels.createSubmit : labels.save
+                      }
+                      onSubmit={schemaFormSubmit}
+                      hideHeader
+                      hideSubmit
+                    />
+                  )}
+                </div>
+              </div>
             </div>
-          </ScrollArea>
+          </div>
         </div>
       </div>
     </div>
   );
+
 }

@@ -6,15 +6,17 @@ import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { StatusBadge } from '@/components/ui/status-badge';
+import { toast } from '@/lib/ui/snackbar';
 import {
-  Pagination,
-  PaginationContent,
-  PaginationEllipsis,
-  PaginationItem,
-  PaginationLink,
-  PaginationNext,
-  PaginationPrevious,
-} from '@/components/ui/pagination';
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from '@/components/ui/alert-dialog';
 import type { ContentfulModelName, ContentfulStore } from '@/lib/store/contentfulStore';
 import { useContentfulStore } from '@/lib/store/contentfulStore';
 import { readLocalizedField } from '@/lib/contentful/readLocalizedField';
@@ -84,6 +86,7 @@ export type EntryListProps = {
   statusDraftLabel?: string;
   onNew: () => void;
   onEdit: (entryId: string) => void;
+  onDeleteMany?: (entryIds: string[]) => void | Promise<void>;
 };
 
 export function EntryList(props: EntryListProps) {
@@ -102,21 +105,22 @@ export function EntryList(props: EntryListProps) {
     statusDraftLabel = 'Draft',
     onNew,
     onEdit,
+    onDeleteMany,
   } = props;
 
   const record = useContentfulStore(cacheModel ? recordSelector(cacheModel) : () => EMPTY_RECORD);
   const modelLoaded = useContentfulStore((s) => (cacheModel ? s.loadedModels[cacheModel] : true));
 
   const [error, setError] = React.useState<string | null>(null);
-  const [page, setPage] = React.useState(1);
   const [searchInput, setSearchInput] = React.useState('');
   const [debouncedSearch, setDebouncedSearch] = React.useState('');
+  const [selectedIds, setSelectedIds] = React.useState<Set<string>>(() => new Set());
+  const [confirmDeleteOpen, setConfirmDeleteOpen] = React.useState(false);
 
   React.useEffect(() => {
     const t = window.setTimeout(() => {
       const next = searchInput.trim();
       setDebouncedSearch((prev) => {
-        if (prev !== next) setPage(1);
         return next;
       });
     }, 350);
@@ -145,22 +149,43 @@ export function EntryList(props: EntryListProps) {
 
   const items = React.useMemo(() => {
     const data = cacheModel ? cacheFiltered : [];
-    const skip = (page - 1) * PAGE_SIZE;
-    return data.slice(skip, skip + PAGE_SIZE);
-  }, [cacheFiltered, cacheModel, page]);
+    return data;
+  }, [cacheFiltered, cacheModel]);
+
+  const allVisibleIds = React.useMemo(
+    () => items.map((e) => String((e as any)?.sys?.id ?? '')).filter(Boolean),
+    [items],
+  );
+  const allVisibleSelected =
+    allVisibleIds.length > 0 && allVisibleIds.every((id) => selectedIds.has(id));
+  const someVisibleSelected =
+    allVisibleIds.some((id) => selectedIds.has(id)) && !allVisibleSelected;
+
+  const headerCheckboxRef = React.useRef<HTMLInputElement | null>(null);
+  React.useEffect(() => {
+    if (!headerCheckboxRef.current) return;
+    headerCheckboxRef.current.indeterminate = someVisibleSelected;
+  }, [someVisibleSelected]);
+
+  React.useEffect(() => {
+    if (!cacheModel) return;
+    const exists = new Set(Object.keys(record));
+    setSelectedIds((prev) => {
+      let changed = false;
+      const next = new Set<string>();
+      for (const id of prev) {
+        if (exists.has(id)) next.add(id);
+        else changed = true;
+      }
+      return changed ? next : prev;
+    });
+  }, [cacheModel, record]);
 
   const total = cacheModel ? cacheFiltered.length : 0;
 
   // Refresh is global (header). Lists are cache-first + on-demand only.
 
-  const totalPages = Math.max(1, Math.ceil(total / PAGE_SIZE));
-
-  React.useEffect(() => {
-    if (page > totalPages) setPage(totalPages);
-  }, [page, totalPages]);
-
-  const pageItems = compactPageList(page, totalPages);
-  const showPagination = total > PAGE_SIZE;
+  const showPagination = false;
 
   const cacheWaiting = Boolean(cacheModel && !modelLoaded);
 
@@ -181,69 +206,30 @@ export function EntryList(props: EntryListProps) {
               </div>
             </div>
 
-            <div className="flex flex-wrap items-center justify-between gap-3">
+            <div className="flex flex-col gap-6">
               <Input
                 type="search"
                 value={searchInput}
                 onChange={(e) => setSearchInput(e.target.value)}
                 placeholder={searchPlaceholder}
-                className="mb-4 max-w-sm min-w-48"
+                className="max-w-sm min-w-48"
                 aria-label="Filter entries"
               />
-              {showPagination ? (
-                <Pagination className="mx-0 w-auto justify-end">
-                  <PaginationContent className="flex-wrap justify-end">
-                    <PaginationItem>
-                      <PaginationPrevious
-                        href="#"
-                        text="Previous"
-                        className={page <= 1 ? 'pointer-events-none opacity-40' : ''}
-                        onClick={(e) => {
-                          e.preventDefault();
-                          if (page > 1) setPage((p) => p - 1);
-                        }}
-                      />
-                    </PaginationItem>
-                    {pageItems.map((p, idx) =>
-                      p === 'ellipsis' ? (
-                        <PaginationItem key={`e-${idx}`}>
-                          <PaginationEllipsis />
-                        </PaginationItem>
-                      ) : (
-                        <PaginationItem key={p}>
-                          <PaginationLink
-                            href="#"
-                            isActive={p === page}
-                            className={p === page ? 'pointer-events-none cursor-default' : ''}
-                            onClick={(e) => {
-                              e.preventDefault();
-                              if (p === page) return;
-                              setPage(p);
-                            }}
-                          >
-                            {p}
-                          </PaginationLink>
-                        </PaginationItem>
-                      ),
-                    )}
-                    <PaginationItem>
-                      <PaginationNext
-                        href="#"
-                        text="Next"
-                        className={page >= totalPages ? 'pointer-events-none opacity-40' : ''}
-                        onClick={(e) => {
-                          e.preventDefault();
-                          if (page < totalPages) setPage((p) => p + 1);
-                        }}
-                      />
-                    </PaginationItem>
-                  </PaginationContent>
-                </Pagination>
+              {onDeleteMany && selectedIds.size > 0 ? (
+                <div className="flex w-full items-center justify-end">
+                  <Button
+                    type="button"
+                    variant="destructive"
+                    onClick={() => setConfirmDeleteOpen(true)}
+                  >
+                    Delete
+                  </Button>
+                </div>
               ) : null}
             </div>
           </div>
 
-          <div className="mt-0 min-h-0 flex-1 overflow-auto pb-[72px] pt-0">
+          <div className="mt-0 min-h-0 flex-1 pt-0">
             <div className="px-4">
             {error ? (
               <p className="mb-4 border border-red-200 bg-red-50 px-4 py-4 text-sm text-red-700">{error}</p>
@@ -253,6 +239,27 @@ export function EntryList(props: EntryListProps) {
               <Table className="w-full border-collapse text-left [&_td]:px-4 [&_td]:py-4 [&_td]:text-left [&_th]:px-4 [&_th]:py-4 [&_th]:text-left">
                 <TableHeader className="[&_tr]:border-0">
                   <TableRow className="border-0 border-b border-neutral-200 bg-neutral-100 hover:bg-neutral-100">
+                    <TableHead className="h-auto w-12 min-w-12 px-4 text-left text-neutral-700">
+                      <input
+                        ref={headerCheckboxRef}
+                        type="checkbox"
+                        role="checkbox"
+                        className="h-4 w-4 cursor-pointer accent-neutral-900"
+                        checked={allVisibleSelected}
+                        aria-label="Select all"
+                        onChange={(e) => {
+                          const checked = e.target.checked;
+                          setSelectedIds((prev) => {
+                            const next = new Set(prev);
+                            for (const id of allVisibleIds) {
+                              if (checked) next.add(id);
+                              else next.delete(id);
+                            }
+                            return next;
+                          });
+                        }}
+                      />
+                    </TableHead>
                     <TableHead className="h-auto text-left text-neutral-700">Title</TableHead>
                     <TableHead className="h-auto text-left text-neutral-700">Status</TableHead>
                     <TableHead className="h-auto text-left text-neutral-700">Updated</TableHead>
@@ -264,7 +271,7 @@ export function EntryList(props: EntryListProps) {
                 <TableBody>
                   {cacheWaiting ? (
                     <TableRow>
-                      <TableCell colSpan={4} className="text-sm text-neutral-500">
+                      <TableCell colSpan={5} className="text-sm text-neutral-500">
                         Loading…
                       </TableCell>
                     </TableRow>
@@ -272,6 +279,8 @@ export function EntryList(props: EntryListProps) {
                   {!cacheWaiting &&
                     items.map((e) => {
                       const primary = readField(e, primaryFieldId, entryLocale);
+                      const id = String((e as any)?.sys?.id ?? '');
+                      const checked = Boolean(id && selectedIds.has(id));
                       return (
                         <TableRow
                           key={e.sys.id}
@@ -286,6 +295,26 @@ export function EntryList(props: EntryListProps) {
                           }}
                           aria-label={`Edit: ${primary || 'entry'}`}
                         >
+                          <TableCell className="w-12 min-w-12 px-4 text-left">
+                            <input
+                              type="checkbox"
+                              role="checkbox"
+                              className="h-4 w-4 cursor-pointer accent-neutral-900"
+                              checked={checked}
+                              aria-label={`Select ${primary || 'entry'}`}
+                              onClick={(ev) => ev.stopPropagation()}
+                              onChange={(ev) => {
+                                const nextChecked = ev.target.checked;
+                                setSelectedIds((prev) => {
+                                  const next = new Set(prev);
+                                  if (!id) return next;
+                                  if (nextChecked) next.add(id);
+                                  else next.delete(id);
+                                  return next;
+                                });
+                              }}
+                            />
+                          </TableCell>
                           <TableCell className="text-left font-medium">{primary}</TableCell>
                           <TableCell className="text-left">
                             <StatusBadge entry={e} />
@@ -306,6 +335,40 @@ export function EntryList(props: EntryListProps) {
           </div>
         </div>
       </div>
+      {onDeleteMany ? (
+        <AlertDialog open={confirmDeleteOpen} onOpenChange={setConfirmDeleteOpen}>
+          <AlertDialogContent>
+            <AlertDialogHeader>
+              <AlertDialogTitle>Delete entries?</AlertDialogTitle>
+              <AlertDialogDescription>
+                This will permanently delete {selectedIds.size} selected item(s).
+              </AlertDialogDescription>
+            </AlertDialogHeader>
+            <AlertDialogFooter>
+              <AlertDialogCancel>Cancel</AlertDialogCancel>
+              <AlertDialogAction
+                onClick={(e) => {
+                  e.preventDefault();
+                  void (async () => {
+                    const ids = Array.from(selectedIds);
+                    try {
+                      await onDeleteMany(ids);
+                      toast.success('Deleted');
+                      setSelectedIds(new Set());
+                      setConfirmDeleteOpen(false);
+                    } catch (err) {
+                      toast.error(err instanceof Error ? err.message : 'Failed to delete');
+                    }
+                  })();
+                }}
+                className="bg-red-600 hover:bg-red-600/90"
+              >
+                Delete
+              </AlertDialogAction>
+            </AlertDialogFooter>
+          </AlertDialogContent>
+        </AlertDialog>
+      ) : null}
     </div>
   );
 }
