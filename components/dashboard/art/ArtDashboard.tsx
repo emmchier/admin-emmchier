@@ -82,6 +82,12 @@ export function ArtDashboard(props: {
           statusDraftLabel="Draft"
           onNew={goCreate}
           onEdit={goEdit}
+          onDeleteMany={async (ids) => {
+            for (const id of ids) {
+              await actions.deleteEntryAction(id);
+              useContentfulStore.getState().remove('project', id);
+            }
+          }}
         />
       ) : (
         <div className="flex min-h-0 flex-1 flex-col">

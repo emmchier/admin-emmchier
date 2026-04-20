@@ -18,16 +18,20 @@ import { EntryReferenceMultiTypeSelect } from '@/components/cms/EntryReferenceMu
 import { ProjectTechsPicker } from '@/components/cms/ProjectTechsPicker';
 import { useProjectEditorStore } from '@/lib/stores/projectEditorStore';
 import { RichTextEditor } from '@/components/cms/RichTextEditor';
-import { ExternalLink } from 'lucide-react';
+import { ExternalLink, Plus } from 'lucide-react';
+import { ArrowUpRight, Copy } from 'lucide-react';
 import { readInitialFieldValue } from '@/lib/contentful/readInitialFieldValue';
 import { coerceRichTextDocument } from '@/lib/contentful/coerceRichTextDocument';
 import { emptyContentfulDocument } from '@/lib/contentful/contentfulTiptapBridge';
-import { cn } from '@/lib/utils';
 import {
   clampEntryFieldString,
   EntryFieldCharacterFooter,
   ENTRY_FIELD_CHAR_LIMIT,
 } from '@/components/cms/entryFieldCharacterLimit';
+import { cn } from '@/lib/utils';
+import { toast } from '@/lib/ui/snackbar';
+import { derivePlatformFromUrlInput, stripUrlForDisplay, validateSocialUrl } from '@/lib/url/socialUrl';
+import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '@/components/ui/tooltip';
 
 type JsonPrimitive = string | number | boolean | null;
 type JsonValue = JsonPrimitive | JsonValue[] | { [k: string]: JsonValue };
@@ -59,6 +63,10 @@ function slugifyTitle(title: string): string {
     .replace(/\s+/g, '-')
     .replace(/[^\w-]+/g, '');
 }
+
+/** Slug is derived from title/name everywhere — never user-editable or focusable. */
+const SLUG_INPUT_READONLY_CLASS =
+  'cursor-default select-none bg-neutral-100 text-neutral-700 border-neutral-200 pointer-events-none focus-visible:border-neutral-200 focus-visible:ring-0 focus-visible:outline-none dark:bg-neutral-900/40 dark:border-neutral-700 dark:text-neutral-300 dark:focus-visible:border-neutral-700';
 
 function isEditableField(field: any): boolean {
   // We intentionally do NOT allow editing the Content Model, only entry values.
@@ -101,6 +109,15 @@ function orderProjectFields<T extends { id: string }>(fields: T[]): T[] {
   return [...rest.slice(0, restBefore), ...blockFields, ...rest.slice(restBefore)];
 }
 
+function orderSocialNetworkFields<T extends { id: string }>(fields: T[]): T[] {
+  const blockIds = ['url', 'platform'] as const;
+  const byId = new Map(fields.map((f) => [f.id, f]));
+  const blockFields = blockIds.map((id) => byId.get(id)).filter((f): f is T => Boolean(f));
+  const set = new Set<string>(blockIds);
+  const rest = fields.filter((f) => !set.has(f.id));
+  return [...blockFields, ...rest];
+}
+
 export function SchemaDrivenEntryForm(props: Props) {
   const {
     contentType,
@@ -121,21 +138,21 @@ export function SchemaDrivenEntryForm(props: Props) {
   const [error, setError] = React.useState<string | null>(null);
   const setField = useProjectEditorStore((s) => s.setField);
   const formDirty = useProjectEditorStore((s) => s.isDirty);
-  const markSlugManual = useProjectEditorStore((s) => s.markSlugManual);
-  const applySlugFromTitleIfAllowed = useProjectEditorStore(
-    (s) => s.applySlugFromTitleIfAllowed
-  );
 
   const fields = React.useMemo(() => {
     return (contentType.fields || []).filter(isEditableField);
   }, [contentType.fields]);
 
   const fieldsForRender = React.useMemo(() => {
-    if (contentType.sys?.id !== 'project') return fields;
-    return orderProjectFields(fields);
+    if (contentType.sys?.id === 'project') return orderProjectFields(fields);
+    if (contentType.sys?.id === 'socialNetwork') return orderSocialNetworkFields(fields);
+    return fields;
   }, [contentType.sys?.id, fields]);
 
   const isProject = contentType.sys?.id === 'project';
+  const isCategory = contentType.sys?.id === 'category';
+  const isNavigationGroup = contentType.sys?.id === 'navigationGroup';
+  const isSocialNetwork = contentType.sys?.id === 'socialNetwork';
   const galleryRef = React.useRef<ProjectGalleryUploaderHandle | null>(null);
 
   const sectionHeading = React.useCallback((f: any, required: boolean) => {
@@ -165,10 +182,17 @@ export function SchemaDrivenEntryForm(props: Props) {
       if (init === undefined) continue;
       const t = fieldType(f);
       if ((t === 'Symbol' || t === 'Text') && typeof init === 'string') {
-        v[f.id] = clampEntryFieldString(init);
+        const next =
+          contentType.sys?.id === 'socialNetwork' && f.id === 'url'
+            ? stripUrlForDisplay(init)
+            : init;
+        v[f.id] = clampEntryFieldString(next);
       } else {
         v[f.id] = init as JsonValue;
       }
+    }
+    if (contentType.sys?.id === 'socialNetwork' && typeof v.url === 'string') {
+      v.platform = derivePlatformFromUrlInput(v.url) as any;
     }
     return v;
   });
@@ -182,10 +206,17 @@ export function SchemaDrivenEntryForm(props: Props) {
       if (init === undefined) continue;
       const t = fieldType(f);
       if ((t === 'Symbol' || t === 'Text') && typeof init === 'string') {
-        initial[f.id] = clampEntryFieldString(init);
+        const next =
+          contentType.sys?.id === 'socialNetwork' && f.id === 'url'
+            ? stripUrlForDisplay(init)
+            : init;
+        initial[f.id] = clampEntryFieldString(next);
       } else {
         initial[f.id] = init;
       }
+    }
+    if (contentType.sys?.id === 'socialNetwork' && typeof initial.url === 'string') {
+      initial.platform = derivePlatformFromUrlInput(initial.url);
     }
     const fp = `${formHydrationKey}:${JSON.stringify(initial)}`;
     if (fp === lastInitialFpRef.current) return;
@@ -271,7 +302,7 @@ export function SchemaDrivenEntryForm(props: Props) {
     <form
       id={formId}
       onSubmit={handleSubmit}
-      className={cn(isProject ? 'space-y-8' : 'space-y-6')}
+      className="space-y-8"
     >
       {!hideHeader ? (
         <>
@@ -284,7 +315,7 @@ export function SchemaDrivenEntryForm(props: Props) {
         </>
       ) : null}
 
-      <div className={cn(isProject ? 'space-y-8' : 'space-y-5')}>
+      <div className="space-y-8">
         {isProject ? (
           <div className="flex flex-col gap-8 md:flex-row md:items-stretch">
             <div className="w-full md:w-1/2">
@@ -296,7 +327,7 @@ export function SchemaDrivenEntryForm(props: Props) {
                   const required = Boolean(f.required);
                   const str = typeof v === 'string' ? v : '';
                   return (
-                    <div className="grid gap-2">
+                    <div className="grid w-full min-w-0 gap-2">
                       <Label htmlFor={f.id}>
                         {sectionHeading(f, required)}
                       </Label>
@@ -310,14 +341,11 @@ export function SchemaDrivenEntryForm(props: Props) {
                           setValue(f.id, next);
                           setField(f.id, next);
                           if (contentTypeHasSlugField) {
-                            const st = useProjectEditorStore.getState();
-                            if (!st.slugManuallyEdited) {
-                              const slug = slugifyTitle(next);
-                              const slugClamped = clampEntryFieldString(slug);
-                              setValue('slug', slugClamped);
-                              setField('slug', slugClamped);
-                            }
-                            applySlugFromTitleIfAllowed();
+                            const slugClamped = clampEntryFieldString(
+                              slugifyTitle(next),
+                            );
+                            setValue('slug', slugClamped);
+                            setField('slug', slugClamped);
                           }
                         }}
                       />
@@ -332,23 +360,18 @@ export function SchemaDrivenEntryForm(props: Props) {
                   const required = Boolean(f.required);
                   const slugStr = typeof v === 'string' ? v : '';
                   return (
-                    <div className="grid gap-2">
-                      <Label htmlFor={f.id}>
-                        {sectionHeading(f, required)}
-                      </Label>
+                    <div className="grid w-full min-w-0 gap-2">
+                      <div className="flex items-center justify-between gap-3">
+                        <Label>{sectionHeading(f, required)}</Label>
+                      </div>
                       <Input
-                        id={f.id}
                         value={slugStr}
-                        maxLength={ENTRY_FIELD_CHAR_LIMIT}
-                        className="w-full"
-                        onChange={(e) => {
-                          const next = clampEntryFieldString(e.target.value);
-                          setValue(f.id, next);
-                          setField(f.id, next);
-                          markSlugManual();
-                        }}
+                        readOnly
+                        tabIndex={-1}
+                        aria-readonly="true"
+                        title="Generado automáticamente desde el título"
+                        className={cn('w-full', SLUG_INPUT_READONLY_CLASS)}
                       />
-                      <EntryFieldCharacterFooter length={slugStr.length} />
                     </div>
                   );
                 })()}
@@ -391,6 +414,7 @@ export function SchemaDrivenEntryForm(props: Props) {
             (f.id === 'title' || f.id === 'slug' || f.id === 'description')
           )
             return null;
+          if (isSocialNetwork && f.id === 'username') return null;
           const t = fieldType(f);
           const v = values[f.id];
           const required = Boolean(f.required);
@@ -403,25 +427,150 @@ export function SchemaDrivenEntryForm(props: Props) {
 
           if (t === 'Symbol') {
             const symStr = typeof v === 'string' ? v : '';
+            const symbolWidthClass =
+              f.id === 'title' || f.id === 'slug'
+                ? isCategory
+                  ? null
+                  : isNavigationGroup
+                    ? 'w-full min-w-0 md:w-1/2'
+                    : 'w-full min-w-0 md:w-3/4'
+                : isSocialNetwork && (f.id === 'platform' || f.id === 'url')
+                  ? 'w-full min-w-0'
+                  : null;
             return (
-              <div key={f.id} className="grid gap-2">
-                {label}
-                <Input
-                  id={f.id}
-                  value={symStr}
-                  maxLength={ENTRY_FIELD_CHAR_LIMIT}
-                  onChange={(e) => {
-                    const next = clampEntryFieldString(e.target.value);
-                    setValue(f.id, next);
-                    setField(f.id, next);
-                    if (contentTypeHasSlugField) {
-                      if (f.id === 'slug') markSlugManual();
-                      if (f.id === 'title' || f.id === 'name')
-                        applySlugFromTitleIfAllowed();
+              <div
+                key={f.id}
+                className={cn(
+                  'grid gap-2',
+                  symbolWidthClass,
+                )}
+              >
+                {f.id === 'slug' ? (
+                  <div className="flex items-center justify-between gap-3">
+                    <Label>{sectionHeading(f, required)}</Label>
+                  </div>
+                ) : (
+                  label
+                )}
+                {isSocialNetwork && f.id === 'url' ? (
+                  <div className="flex w-full items-center gap-2 md:w-1/2">
+                    <Input
+                      id={f.id}
+                      value={symStr}
+                      maxLength={ENTRY_FIELD_CHAR_LIMIT}
+                      className="w-full"
+                      onChange={(e) => {
+                        const next = clampEntryFieldString(e.target.value);
+                        setValue(f.id, next);
+                        setField(f.id, next);
+                        const nextPlatform = derivePlatformFromUrlInput(next);
+                        setValue('platform', nextPlatform as any);
+                        setField('platform', nextPlatform as any);
+                      }}
+                    />
+                    <TooltipProvider delayDuration={150}>
+                      <Tooltip>
+                        <TooltipTrigger asChild>
+                          <Button
+                            type="button"
+                            variant="outline"
+                            size="icon"
+                            aria-label="Copy URL"
+                            disabled={!validateSocialUrl(symStr).ok}
+                            onClick={async () => {
+                              const chk = validateSocialUrl(symStr);
+                              if (!chk.ok) return;
+                              try {
+                                await navigator.clipboard.writeText(chk.normalized);
+                                toast.success('Copied');
+                              } catch {
+                                toast.error('Failed to copy');
+                              }
+                            }}
+                          >
+                            <Copy className="h-4 w-4" />
+                          </Button>
+                        </TooltipTrigger>
+                        <TooltipContent className="bg-black text-white">
+                          Copy
+                        </TooltipContent>
+                      </Tooltip>
+                    </TooltipProvider>
+                    <TooltipProvider delayDuration={150}>
+                      <Tooltip>
+                        <TooltipTrigger asChild>
+                          <Button
+                            type="button"
+                            variant="outline"
+                            size="icon"
+                            aria-label="Open URL"
+                            disabled={!validateSocialUrl(symStr).ok}
+                            onClick={() => {
+                              const chk = validateSocialUrl(symStr);
+                              if (!chk.ok) return;
+                              window.open(chk.normalized, '_blank', 'noopener,noreferrer');
+                            }}
+                          >
+                            <ArrowUpRight className="h-4 w-4" />
+                          </Button>
+                        </TooltipTrigger>
+                        <TooltipContent className="bg-black text-white">
+                          Open link
+                        </TooltipContent>
+                      </Tooltip>
+                    </TooltipProvider>
+                  </div>
+                ) : isSocialNetwork && f.id === 'platform' ? (
+                  <Input
+                    id={f.id}
+                    value={derivePlatformFromUrlInput(typeof values.url === 'string' ? (values.url as string) : '')}
+                    disabled
+                    className="w-full md:w-1/2"
+                  />
+                ) : (
+                  <Input
+                    id={f.id === 'slug' ? undefined : f.id}
+                    value={symStr}
+                    readOnly={f.id === 'slug'}
+                    tabIndex={f.id === 'slug' ? -1 : undefined}
+                    aria-readonly={f.id === 'slug' ? 'true' : undefined}
+                    title={
+                      f.id === 'slug'
+                        ? 'Generado automáticamente desde el título o nombre'
+                        : undefined
                     }
-                  }}
-                />
-                <EntryFieldCharacterFooter length={symStr.length} />
+                    maxLength={ENTRY_FIELD_CHAR_LIMIT}
+                    className={cn(
+                      isSocialNetwork && (f.id === 'platform' || f.id === 'url')
+                        ? 'w-full md:w-1/2'
+                        : 'w-full',
+                      f.id === 'slug' && SLUG_INPUT_READONLY_CLASS,
+                    )}
+                    onChange={
+                      f.id === 'slug'
+                        ? undefined
+                        : (e) => {
+                            const next = clampEntryFieldString(e.target.value);
+                            setValue(f.id, next);
+                            setField(f.id, next);
+                            if (!contentTypeHasSlugField) return;
+                            if (f.id === 'title' || f.id === 'name') {
+                              const slugNext = clampEntryFieldString(
+                                slugifyTitle(next),
+                              );
+                              setValue('slug', slugNext);
+                              setField('slug', slugNext);
+                            }
+                          }
+                    }
+                  />
+                )}
+                {isSocialNetwork && f.id === 'url' && symStr.trim() && !validateSocialUrl(symStr).ok ? (
+                  <p className="text-xs text-red-600">Invalid URL</p>
+                ) : null}
+                {f.id !== 'slug' && !(isSocialNetwork && (f.id === 'platform' || f.id === 'url')) ? (
+                  <EntryFieldCharacterFooter length={symStr.length} />
+                ) : null}
               </div>
             );
           }
@@ -439,9 +588,6 @@ export function SchemaDrivenEntryForm(props: Props) {
                   onChange={(e) => {
                     const next = clampEntryFieldString(e.target.value);
                     setValue(f.id, next);
-                  }}
-                  onBlur={(e) => {
-                    const next = clampEntryFieldString(e.target.value);
                     setField(f.id, next);
                   }}
                   rows={isDescription ? 8 : 4}
@@ -453,23 +599,31 @@ export function SchemaDrivenEntryForm(props: Props) {
           }
 
           if (t === 'Integer' || t === 'Number') {
+            const numStr =
+              typeof v === 'number' && !Number.isNaN(v) ? String(v) : '';
             return (
               <div key={f.id} className="grid gap-2">
                 {label}
                 <Input
                   id={f.id}
                   type="number"
-                  value={typeof v === 'number' ? String(v) : ''}
-                  onChange={(e) =>
-                    setValue(
-                      f.id,
-                      e.target.value === '' ? null : Number(e.target.value)
-                    )
-                  }
-                  onBlur={() =>
-                    setField(f.id, typeof v === 'number' ? v : null)
-                  }
+                  value={numStr}
+                  className="w-60 max-w-full"
+                  onChange={(e) => {
+                    const raw = e.target.value;
+                    const parsed =
+                      raw === '' || raw === '-'
+                        ? null
+                        : Number(raw);
+                    const next =
+                      parsed === null || Number.isNaN(parsed)
+                        ? null
+                        : parsed;
+                    setValue(f.id, next as unknown as JsonValue);
+                    setField(f.id, next as unknown as JsonValue);
+                  }}
                 />
+                <p className="text-xs text-neutral-500">Valor numérico.</p>
               </div>
             );
           }
@@ -480,15 +634,9 @@ export function SchemaDrivenEntryForm(props: Props) {
                 key={f.id}
                 className="flex items-center justify-between gap-3 border border-neutral-200 px-4 py-4"
               >
-                <div className="grid gap-0.5">
-                  <Label htmlFor={f.id} className="text-sm">
-                    {f.name || f.id}{' '}
-                    <span className="text-xs text-zinc-500">({f.id})</span>
-                  </Label>
-                  <p className="text-xs text-zinc-500">
-                    {required ? 'required' : 'optional'}
-                  </p>
-                </div>
+                <Label htmlFor={f.id} className="cursor-pointer">
+                  {sectionHeading(f, required)}
+                </Label>
                 <Switch
                   id={f.id}
                   checked={Boolean(v)}
@@ -536,13 +684,18 @@ export function SchemaDrivenEntryForm(props: Props) {
               return (
                 <div key={f.id} className="grid gap-2">
                   <div className="flex items-center justify-between gap-3">
-                    {sectionHeading({ ...f, name: 'Gallery' }, required)}
+                    {sectionHeading(
+                      { ...f, name: `Gallery(${links.length})` },
+                      required,
+                    )}
                     <Button
                       type="button"
-                      variant="outline"
-                      size="sm"
+                      variant="default"
+                      size="lg"
+                      className="gap-2 bg-zinc-900 text-white hover:bg-zinc-800"
                       onClick={() => galleryRef.current?.open?.()}
                     >
+                      <Plus className="h-5 w-5" strokeWidth={2.5} />
                       Add images
                     </Button>
                   </div>
@@ -593,6 +746,8 @@ export function SchemaDrivenEntryForm(props: Props) {
                     managementApiRoot={managementApiRoot}
                     sourceContentTypeId={linkTypes[0]!}
                     entryLocale={locale}
+                    fullWidth={isCategory || isNavigationGroup}
+                    halfWidthSearch={isNavigationGroup}
                   />
                 </div>
               );
@@ -610,6 +765,8 @@ export function SchemaDrivenEntryForm(props: Props) {
                     managementApiRoot={managementApiRoot}
                     sourceContentTypeIds={linkTypes}
                     entryLocale={locale}
+                    fullWidth={isCategory || isNavigationGroup}
+                    halfWidthSearch={isNavigationGroup}
                   />
                 </div>
               );

@@ -3,7 +3,7 @@
 import * as React from 'react';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
-import { ScrollArea } from '@/components/ui/scroll-area';
+import { cmsChipToggleClassName } from '@/components/cms/chipStyles';
 import { Check, Loader2, X } from 'lucide-react';
 import type { EntryLink } from '@/components/cms/EntryReferenceMultiSelect';
 import { readLocalizedField } from '@/lib/contentful/readLocalizedField';
@@ -257,10 +257,9 @@ export function ProjectTechsPicker(props: {
       </div>
 
       <div className="grid gap-2">
-        <p className="text-xs font-medium text-neutral-600">Techs disponibles</p>
         {loadError ? <p className="text-xs text-red-600">{loadError}</p> : null}
-        <ScrollArea className="max-h-56 rounded-md border border-neutral-200">
-          <div className="flex flex-wrap gap-2 p-3">
+        <div className="max-h-56 overflow-y-auto">
+          <div className="flex flex-wrap gap-2">
             {!techLoaded ? (
               <p className="w-full py-6 text-center text-xs text-zinc-500">Cargando techs…</p>
             ) : sortedCandidates.length === 0 ? (
@@ -276,20 +275,15 @@ export function ProjectTechsPicker(props: {
                     type="button"
                     aria-pressed={selected}
                     onClick={() => toggle(id)}
-                    className={cn(
-                      'rounded-full border px-3 py-1.5 text-left text-xs font-medium transition-colors',
-                      selected
-                        ? 'border-zinc-900 bg-zinc-900 text-white hover:bg-zinc-800'
-                        : 'border-neutral-200 bg-white text-neutral-800 hover:bg-neutral-50',
-                    )}
+                    className={cmsChipToggleClassName(selected)}
                   >
-                    <span className="max-w-[220px] truncate">{lab || id}</span>
+                    <span className="min-w-0 truncate">{lab || id}</span>
                   </button>
                 );
               })
             )}
           </div>
-        </ScrollArea>
+        </div>
       </div>
     </div>
   );

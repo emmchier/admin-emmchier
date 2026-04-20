@@ -3,10 +3,9 @@
 import * as React from 'react';
 import { Input } from '@/components/ui/input';
 import { ScrollArea } from '@/components/ui/scroll-area';
-import { Badge } from '@/components/ui/badge';
-import { X } from 'lucide-react';
 import { readLocalizedField } from '@/lib/contentful/readLocalizedField';
 import { contentfulService } from '@/services/contentfulService';
+import { cn } from '@/lib/utils';
 
 export type EntryLink = { sys: { type: 'Link'; linkType: 'Entry'; id: string } };
 
@@ -34,6 +33,10 @@ export function EntryReferenceMultiSelect(props: {
   managementApiRoot?: string;
   sourceContentTypeId: string;
   entryLocale: string;
+  /** Category editor: stretch search + list to container width */
+  fullWidth?: boolean;
+  /** When true, the search input is half width (md+) */
+  halfWidthSearch?: boolean;
   searchPlaceholder?: string;
   emptyListHint?: string;
 }) {
@@ -43,6 +46,8 @@ export function EntryReferenceMultiSelect(props: {
     managementApiRoot = '/api/contentful',
     sourceContentTypeId,
     entryLocale,
+    fullWidth = false,
+    halfWidthSearch = false,
   searchPlaceholder = 'Search…',
     emptyListHint = 'No hay coincidencias.',
   } = props;
@@ -72,14 +77,6 @@ export function EntryReferenceMultiSelect(props: {
 
   const selectedIds = React.useMemo(() => new Set(value.map((l) => l.sys.id)), [value]);
 
-  const labelById = React.useMemo(() => {
-    const m: Record<string, string> = {};
-    for (const e of candidates) {
-      m[e.sys.id] = readEntryLabel(e, entryLocale);
-    }
-    return m;
-  }, [candidates, entryLocale]);
-
   const filtered = React.useMemo(() => {
     const q = query.trim().toLowerCase();
     if (!q) return candidates;
@@ -99,66 +96,66 @@ export function EntryReferenceMultiSelect(props: {
     [onChange, selectedIds],
   );
 
-  const remove = React.useCallback(
-    (id: string) => {
-      onChange(value.filter((l) => l.sys.id !== id));
-    },
-    [onChange, value],
-  );
-
   return (
     <div className="grid gap-2">
-      <div className="flex min-h-9 flex-wrap gap-2">
-        {value.length === 0 ? (
-          <span className="text-xs text-zinc-500">Ninguno seleccionado.</span>
-        ) : (
-          value.map((l, idx) => (
-            <Badge key={`${l.sys.id}-${idx}`} variant="secondary" className="gap-1 pr-1 font-normal">
-              <span className="max-w-[220px] truncate">{labelById[l.sys.id] || l.sys.id}</span>
-              <button
-                type="button"
-                className="rounded p-0.5 text-zinc-600 hover:bg-zinc-200 hover:text-zinc-900"
-                aria-label={`Quitar ${labelById[l.sys.id] || l.sys.id}`}
-                onClick={() => remove(l.sys.id)}
-              >
-                <X className="h-3.5 w-3.5" />
-              </button>
-            </Badge>
-          ))
+      <Input
+        value={query}
+        onChange={(e) => setQuery(e.target.value)}
+        placeholder={searchPlaceholder}
+        className={cn(
+          fullWidth ? 'w-full' : 'w-60 max-w-full',
+          halfWidthSearch && 'w-full md:w-1/2',
         )}
-      </div>
-
-      <Input value={query} onChange={(e) => setQuery(e.target.value)} placeholder={searchPlaceholder} />
+      />
 
       {loadError ? <p className="text-xs text-red-600">{loadError}</p> : null}
 
-      <ScrollArea className="h-48 border border-neutral-200">
-        <div className="p-1">
-          {filtered.length === 0 ? (
-            <p className="px-4 py-6 text-center text-xs text-zinc-500">{emptyListHint}</p>
-          ) : (
-            filtered.map((e) => {
-              const id = e.sys.id as string;
-              const active = selectedIds.has(id);
-              const lab = readEntryLabel(e, entryLocale);
-              return (
-                <button
-                  key={id}
-                  type="button"
-                  onClick={() => toggle(id)}
-                  className={[
-                    'flex w-full items-center justify-between gap-2 rounded-md px-4 py-4 text-left text-sm transition',
-                    active ? 'bg-zinc-900 text-white' : 'text-zinc-800 hover:bg-zinc-100',
-                  ].join(' ')}
-                >
-                  <span className="min-w-0 flex-1 truncate font-medium">{lab || id}</span>
-                  <span className="shrink-0 font-mono text-[10px] opacity-70">{active ? '✓' : '+'}</span>
-                </button>
-              );
-            })
-          )}
-        </div>
-      </ScrollArea>
+      <div
+        className={cn(
+          'w-full min-w-0',
+          fullWidth ? 'max-w-none' : 'md:w-3/4',
+        )}
+      >
+        <ScrollArea className="h-[50vh]">
+          <div className="flex flex-col gap-1 pr-4">
+            {filtered.length === 0 ? (
+              <p className="py-6 text-center text-xs text-zinc-500">{emptyListHint}</p>
+            ) : (
+              filtered.map((e) => {
+                const id = e.sys.id as string;
+                const active = selectedIds.has(id);
+                const lab = readEntryLabel(e, entryLocale);
+                return (
+                  <button
+                    key={id}
+                    type="button"
+                    aria-pressed={active}
+                    onClick={() => toggle(id)}
+                    className={[
+                      'flex h-14 w-full shrink-0 items-center gap-3 rounded-md border px-3 text-left text-sm transition',
+                      active
+                        ? 'border-transparent bg-zinc-200 text-zinc-900'
+                        : 'border-neutral-200 text-zinc-800 hover:bg-zinc-50',
+                    ].join(' ')}
+                  >
+                    <input
+                      type="checkbox"
+                      checked={active}
+                      readOnly
+                      tabIndex={-1}
+                      aria-hidden="true"
+                      className="pointer-events-none h-4 w-4 shrink-0 rounded border-zinc-400 accent-zinc-700"
+                    />
+                    <span className="line-clamp-2 min-w-0 flex-1 whitespace-normal wrap-break-word text-left leading-snug font-medium">
+                      {lab || id}
+                    </span>
+                  </button>
+                );
+              })
+            )}
+          </div>
+        </ScrollArea>
+      </div>
     </div>
   );
 }

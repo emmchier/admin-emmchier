@@ -60,6 +60,12 @@ export function TechDashboard(props: { entryLocale: string; contentfulSpaceId: s
           refreshingLabel="Refreshing…"
           onNew={goCreate}
           onEdit={goEdit}
+          onDeleteMany={async (ids) => {
+            for (const id of ids) {
+              await actions.deleteEntryAction(id);
+              useContentfulStore.getState().remove('tech', id);
+            }
+          }}
         />
       ) : (
         <div className="flex min-h-0 flex-1 flex-col">

@@ -23,7 +23,14 @@ import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Textarea } from '@/components/ui/textarea';
 import { Dialog, DialogContent } from '@/components/ui/dialog';
-import { Sheet, SheetContent, SheetFooter, SheetHeader, SheetTitle } from '@/components/ui/sheet';
+import {
+  Sheet,
+  SheetContent,
+  SheetFooter,
+  SheetHeader,
+  SheetScrollBody,
+  SheetTitle,
+} from '@/components/ui/sheet';
 import {
   AlertDialog,
   AlertDialogAction,
@@ -34,7 +41,7 @@ import {
   AlertDialogHeader,
   AlertDialogTitle,
 } from '@/components/ui/alert-dialog';
-import { GripVertical, Trash2, ArrowLeft, ImagePlus } from 'lucide-react';
+import { GripVertical, Trash2, ArrowLeft, CheckCircle2 } from 'lucide-react';
 import { contentfulService } from '@/services/contentfulService';
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '@/components/ui/tooltip';
 import {
@@ -43,6 +50,7 @@ import {
   clampEntryFieldString,
 } from '@/components/cms/entryFieldCharacterLimit';
 import { cn } from '@/lib/utils';
+import { ConfirmDiscardDialog } from '@/components/ui/ConfirmDiscardDialog';
 
 type EntryLink = { sys: { type: 'Link'; linkType: 'Entry'; id: string } };
 
@@ -70,14 +78,31 @@ function truncateImageNameLabel(name: string, max = IMAGE_NAME_MAX): string {
   return `${name.slice(0, max)}…`;
 }
 
+/** Pixel dimensions, megapixel count (resolución útil), y extensión */
+function formatLinkedAssetDetails(meta: {
+  width: number | null;
+  height: number | null;
+  extension: string | null;
+}): string | null {
+  const parts: string[] = [];
+  if (meta.width != null && meta.height != null) {
+    parts.push(`${meta.width} × ${meta.height} px`);
+    const mp = (meta.width * meta.height) / 1_000_000;
+    if (mp >= 0.005) parts.push(`${mp >= 1 ? mp.toFixed(1) : mp.toFixed(2)} MP`);
+  }
+  if (meta.extension) parts.push(`.${meta.extension}`);
+  return parts.length > 0 ? parts.join(' · ') : null;
+}
+
 function SortableLinkedImageRow(props: {
   entryId: string;
   displayTitleFull: string;
   url: string | null;
+  assetDetailLine: string | null;
   onPreview: () => void;
   onRemoveRequest: () => void;
 }) {
-  const { entryId, displayTitleFull, url, onPreview, onRemoveRequest } = props;
+  const { entryId, displayTitleFull, url, assetDetailLine, onPreview, onRemoveRequest } = props;
   const {
     attributes,
     listeners,
@@ -100,7 +125,7 @@ function SortableLinkedImageRow(props: {
       ref={setNodeRef}
       style={style}
       className={cn(
-        'flex items-center gap-3 bg-white px-4 py-4 outline-none transition-[opacity,transform,box-shadow] duration-200 ease-out',
+        'flex items-center gap-4 bg-white py-4 pl-4 pr-4 outline-none transition-[opacity,transform,box-shadow] duration-200 ease-out',
         isDragging &&
           'relative z-20 scale-[0.995] opacity-90 shadow-xl ring-2 ring-zinc-900/20',
       )}
@@ -108,14 +133,14 @@ function SortableLinkedImageRow(props: {
       <button
         type="button"
         className={cn(
-          'flex shrink-0 cursor-grab touch-none items-center rounded-md border border-transparent p-1 text-zinc-400 hover:bg-zinc-100 hover:text-zinc-700 active:cursor-grabbing',
+          'flex shrink-0 cursor-grab touch-none items-center justify-center rounded-md border border-transparent py-2 text-zinc-400 active:cursor-grabbing',
           isDragging && 'text-zinc-900',
         )}
         aria-label="Reorder"
         {...attributes}
         {...listeners}
       >
-        <GripVertical className="h-4 w-4" />
+        <GripVertical className="h-6 w-6" strokeWidth={1.75} />
       </button>
       <div className="flex min-w-0 flex-1 items-center gap-3 overflow-hidden">
         <button
@@ -145,7 +170,7 @@ function SortableLinkedImageRow(props: {
           <TooltipProvider delayDuration={300}>
             <Tooltip>
               <TooltipTrigger asChild>
-                <p className="block min-w-0 truncate text-sm font-medium leading-snug text-zinc-900">
+                <p className="block min-w-0 truncate text-[15px] font-medium leading-snug text-zinc-900">
                   {shown}
                 </p>
               </TooltipTrigger>
@@ -156,7 +181,9 @@ function SortableLinkedImageRow(props: {
               ) : null}
             </Tooltip>
           </TooltipProvider>
-          <p className="mt-0.5 truncate font-mono text-[11px] leading-tight text-zinc-500">{entryId}</p>
+          {assetDetailLine ? (
+            <p className="mt-0.5 truncate text-[12px] leading-tight text-zinc-500">{assetDetailLine}</p>
+          ) : null}
         </div>
       </div>
       <TooltipProvider>
@@ -180,7 +207,14 @@ function SortableLinkedImageRow(props: {
   );
 }
 
-type PreviewMap = Record<string, { url: string | null }>;
+type PreviewEntry = {
+  url: string | null;
+  width: number | null;
+  height: number | null;
+  extension: string | null;
+  mimeType: string | null;
+};
+type PreviewMap = Record<string, PreviewEntry>;
 const previewsCache = new Map<string, PreviewMap>();
 const previewsInflight = new Map<string, Promise<PreviewMap>>();
 
@@ -199,12 +233,17 @@ export const ProjectGalleryUploader = React.forwardRef<ProjectGalleryUploaderHan
   const { value, onChange, managementApiRoot = '/api/contentful', projectSlug } = props;
   const inputRef = React.useRef<HTMLInputElement>(null);
   const [items, setItems] = React.useState<UploadItem[]>([]);
-  const [previews, setPreviews] = React.useState<Record<string, { url: string | null }>>({});
+  const [previews, setPreviews] = React.useState<PreviewMap>({});
   const [sheetOpen, setSheetOpen] = React.useState(false);
   const [sheetView, setSheetView] = React.useState<'grid' | 'detail'>('grid');
   const [selectedQueueId, setSelectedQueueId] = React.useState<string | null>(null);
+  const [confirmDiscardOpen, setConfirmDiscardOpen] = React.useState(false);
   const [previewOpen, setPreviewOpen] = React.useState(false);
-  const [previewImage, setPreviewImage] = React.useState<{ url: string; title: string } | null>(null);
+  const [previewImage, setPreviewImage] = React.useState<{
+    url: string;
+    title: string;
+    detailLine: string | null;
+  } | null>(null);
   const [pendingRemoveLinkedId, setPendingRemoveLinkedId] = React.useState<string | null>(null);
 
   const slugSafe = (projectSlug || '').trim();
@@ -232,7 +271,7 @@ export const ProjectGalleryUploader = React.forwardRef<ProjectGalleryUploaderHan
     if (ids.length === 0) return;
 
     // Cache-first previews: if we already resolved URLs for this set, paint instantly.
-    const cacheKey = `${managementApiRoot}::${[...ids].sort().join(',')}`;
+    const cacheKey = `${managementApiRoot}::v2imgmeta::${[...ids].sort().join(',')}`;
     const cached = previewsCache.get(cacheKey);
     if (cached) {
       setPreviews(cached);
@@ -248,9 +287,15 @@ export const ProjectGalleryUploader = React.forwardRef<ProjectGalleryUploaderHan
             const space = contentfulService.inferSpaceFromManagementApiRoot(managementApiRoot);
             const items = await contentfulService.getImageAssetPreviews({ space, entryIds: ids });
             for (const it of items || []) {
-              const entryId = String((it as any).entryId ?? '');
+              const entryId = String(it.entryId ?? '');
               if (!entryId) continue;
-              map[entryId] = { url: (it as any).url ?? null };
+              map[entryId] = {
+                url: it.url ?? null,
+                width: it.width ?? null,
+                height: it.height ?? null,
+                extension: it.extension ?? null,
+                mimeType: it.mimeType ?? null,
+              };
             }
             previewsCache.set(cacheKey, map);
             return map;
@@ -398,6 +443,29 @@ export const ProjectGalleryUploader = React.forwardRef<ProjectGalleryUploaderHan
 
   // No manual "Upload" step: uploads/conversion run automatically on add.
 
+  const discardLocalUploadsAndClose = React.useCallback(() => {
+    setItems((prev) => {
+      prev.forEach((it) => {
+        if (it.previewUrl) URL.revokeObjectURL(it.previewUrl);
+      });
+      return [];
+    });
+    setSheetView('grid');
+    setSelectedQueueId(null);
+    setConfirmDiscardOpen(false);
+    setSheetOpen(false);
+  }, []);
+
+  const requestSheetClose = React.useCallback(() => {
+    if (items.length > 0) {
+      setConfirmDiscardOpen(true);
+      return;
+    }
+    setSheetOpen(false);
+  }, [items.length]);
+
+  const hasSavableUploads = items.some((it) => it.status === 'done' && it.entryId);
+
   const commitUploadedToGallery = React.useCallback(() => {
     const uploaded = items.filter((it) => it.status === 'done' && it.entryId).map((it) => it.entryId!) ;
     if (uploaded.length === 0) {
@@ -464,9 +532,6 @@ export const ProjectGalleryUploader = React.forwardRef<ProjectGalleryUploaderHan
     <div className="space-y-3">
       {value.length ? (
         <div className="border border-neutral-200">
-          <div className="border-b border-neutral-200 px-4 py-4">
-            <p className="text-xs font-medium text-neutral-600">Imágenes vinculadas ({value.length})</p>
-          </div>
           <DndContext
             sensors={sensors}
             collisionDetection={closestCenter}
@@ -477,7 +542,15 @@ export const ProjectGalleryUploader = React.forwardRef<ProjectGalleryUploaderHan
                 {value.map((l, idx) => {
                   const entryId = l.sys.id;
                   const displayTitleFull = desiredTitle(entryId, idx);
-                  const url = previews[entryId]?.url ?? null;
+                  const p = previews[entryId];
+                  const url = p?.url ?? null;
+                  const assetDetailLine = p
+                    ? formatLinkedAssetDetails({
+                        width: p.width,
+                        height: p.height,
+                        extension: p.extension,
+                      })
+                    : null;
 
                   return (
                     <SortableLinkedImageRow
@@ -485,10 +558,12 @@ export const ProjectGalleryUploader = React.forwardRef<ProjectGalleryUploaderHan
                       entryId={entryId}
                       displayTitleFull={displayTitleFull}
                       url={url}
+                      assetDetailLine={assetDetailLine}
                       onPreview={() => {
                         setPreviewImage({
                           url: url!,
                           title: displayTitleFull,
+                          detailLine: assetDetailLine,
                         });
                         setPreviewOpen(true);
                       }}
@@ -502,13 +577,19 @@ export const ProjectGalleryUploader = React.forwardRef<ProjectGalleryUploaderHan
         </div>
       ) : null}
 
-      <Sheet open={sheetOpen} onOpenChange={setSheetOpen}>
+      <Sheet
+        open={sheetOpen}
+        onOpenChange={(open) => {
+          if (open) setSheetOpen(true);
+          else requestSheetClose();
+        }}
+      >
         <SheetContent side="right" className="w-full sm:max-w-lg">
           <SheetHeader>
             <SheetTitle className="text-base">Add images</SheetTitle>
           </SheetHeader>
 
-          <div className="mt-4 space-y-3">
+          <SheetScrollBody className="space-y-3 pt-2">
             <input
               ref={inputRef}
               type="file"
@@ -523,12 +604,13 @@ export const ProjectGalleryUploader = React.forwardRef<ProjectGalleryUploaderHan
 
             {sheetView === 'grid' ? (
               <>
-                <div className="flex items-center justify-between gap-2">
-                  <Button type="button" variant="outline" onClick={() => inputRef.current?.click()}>
-                    <ImagePlus className="mr-2 h-4 w-4" />
-                    Select files
-                  </Button>
-                </div>
+                {items.length > 0 ? (
+                  <div className="flex justify-start">
+                    <Button type="button" variant="outline" onClick={() => inputRef.current?.click()}>
+                      Add more
+                    </Button>
+                  </div>
+                ) : null}
 
                 {items.length ? (
                   <div className="grid grid-cols-2 gap-2">
@@ -537,10 +619,18 @@ export const ProjectGalleryUploader = React.forwardRef<ProjectGalleryUploaderHan
                         <div className="relative aspect-square w-full bg-zinc-50">
                           {it.previewUrl ? (
                             // eslint-disable-next-line @next/next/no-img-element
-                            <img src={it.previewUrl} alt={it.title || it.file.name} className="h-full w-full object-cover" />
+                            <img src={it.previewUrl} alt={it.title || it.file.name} className="relative z-0 h-full w-full object-cover" />
                           ) : null}
 
-                          <div className="absolute right-2 top-2 flex items-center gap-2">
+                          {it.status === 'done' ? (
+                            <CheckCircle2
+                              className="pointer-events-none absolute right-4 top-4 z-20 h-7 w-7 text-green-600 drop-shadow-[0_1px_2px_rgba(0,0,0,0.25)]"
+                              strokeWidth={2}
+                              aria-hidden
+                            />
+                          ) : null}
+
+                          <div className="absolute left-4 top-4 z-20 flex items-center gap-2">
                             <TooltipProvider>
                               <Tooltip>
                                 <TooltipTrigger asChild>
@@ -548,7 +638,11 @@ export const ProjectGalleryUploader = React.forwardRef<ProjectGalleryUploaderHan
                                     type="button"
                                     variant="secondary"
                                     size="icon"
-                                    onClick={() => removeLocal(it.id)}
+                                    className="shadow-sm"
+                                    onClick={(e) => {
+                                      e.stopPropagation();
+                                      removeLocal(it.id);
+                                    }}
                                     aria-label="Remove"
                                   >
                                     <Trash2 className="h-4 w-4" />
@@ -558,6 +652,14 @@ export const ProjectGalleryUploader = React.forwardRef<ProjectGalleryUploaderHan
                               </Tooltip>
                             </TooltipProvider>
                           </div>
+
+                          {it.status === 'uploading' ? (
+                            <div className="absolute inset-x-0 bottom-0 z-10 px-2 pb-2 pt-6 bg-linear-to-t from-black/45 to-transparent">
+                              <div className="h-1.5 w-full overflow-hidden rounded-full bg-white/90">
+                                <div className="h-full rounded-full bg-zinc-900" style={{ width: `${it.progress}%` }} />
+                              </div>
+                            </div>
+                          ) : null}
                         </div>
 
                         <button
@@ -582,13 +684,14 @@ export const ProjectGalleryUploader = React.forwardRef<ProjectGalleryUploaderHan
                               ) : null}
                             </Tooltip>
                           </TooltipProvider>
-                          <p className="mt-1 text-[11px] text-zinc-500">
-                            {it.status === 'uploading' ? 'Uploading…' : it.status === 'done' ? 'Ready' : it.status === 'error' ? 'Error' : 'Queued'}
-                          </p>
-                          {it.status === 'uploading' ? (
-                            <div className="mt-2 h-1.5 w-full overflow-hidden rounded bg-zinc-100">
-                              <div className="h-full bg-zinc-900" style={{ width: `${it.progress}%` }} />
-                            </div>
+                          {it.status !== 'done' ? (
+                            <p className="mt-1 text-[11px] text-zinc-500">
+                              {it.status === 'uploading'
+                                ? 'Uploading…'
+                                : it.status === 'error'
+                                  ? 'Error'
+                                  : 'Queued'}
+                            </p>
                           ) : null}
                         </button>
                       </div>
@@ -596,15 +699,31 @@ export const ProjectGalleryUploader = React.forwardRef<ProjectGalleryUploaderHan
                   </div>
                 ) : (
                   <div
-                    className="border border-dashed border-neutral-300 bg-neutral-50/80 p-6 text-sm text-neutral-600"
-                    onDragOver={(e) => e.preventDefault()}
+                    className="flex min-h-[220px] flex-col items-center justify-center rounded-lg border-2 border-dashed border-neutral-300 bg-neutral-50/90 px-6 py-12 text-center text-sm text-neutral-700 transition-colors"
+                    onDragOver={(e) => {
+                      e.preventDefault();
+                      e.stopPropagation();
+                    }}
                     onDrop={(e) => {
                       e.preventDefault();
                       const files = e.dataTransfer?.files;
                       if (files && files.length) addFiles(files);
                     }}
                   >
-                    Drag & drop images here, or use “Select files”.
+                    <p className="max-w-sm leading-relaxed">
+                      Arrastrá un documento aquí, o{' '}
+                      <button
+                        type="button"
+                        className="inline font-medium text-zinc-900 underline decoration-zinc-400 underline-offset-2 transition-colors hover:text-zinc-700"
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          inputRef.current?.click();
+                        }}
+                      >
+                        subilo desde tu computadora
+                      </button>
+                      .
+                    </p>
                   </div>
                 )}
               </>
@@ -682,15 +801,28 @@ export const ProjectGalleryUploader = React.forwardRef<ProjectGalleryUploaderHan
                 })()}
               </>
             )}
-          </div>
+          </SheetScrollBody>
 
-          <SheetFooter className="mt-6">
-            <Button type="button" onClick={commitUploadedToGallery}>
+          <SheetFooter className="flex-row flex-wrap justify-end gap-2 sm:flex-nowrap">
+            <Button type="button" variant="outline" onClick={requestSheetClose}>
+              Close
+            </Button>
+            <Button type="button" disabled={!hasSavableUploads} onClick={commitUploadedToGallery}>
               Save
             </Button>
           </SheetFooter>
         </SheetContent>
       </Sheet>
+
+      <ConfirmDiscardDialog
+        open={confirmDiscardOpen}
+        onOpenChange={(open) => !open && setConfirmDiscardOpen(false)}
+        title="Discard uploads?"
+        description="You have images added in this sheet that haven't been saved to the gallery yet. If you close now, they will be lost."
+        discardLabel="Discard and close"
+        cancelLabel="Keep editing"
+        onDiscard={discardLocalUploadsAndClose}
+      />
 
       <AlertDialog open={pendingRemoveLinkedId != null} onOpenChange={(open) => !open && setPendingRemoveLinkedId(null)}>
         <AlertDialogContent>
@@ -723,14 +855,21 @@ export const ProjectGalleryUploader = React.forwardRef<ProjectGalleryUploaderHan
           if (!open) setPreviewImage(null);
         }}
       >
-        <DialogContent className="max-w-5xl p-0">
-          <div className="border-b border-zinc-200 px-4 py-3">
+        <DialogContent className="max-w-5xl gap-0 overflow-hidden p-0 sm:max-w-5xl">
+          <div className="border-b border-zinc-200 px-4 py-3 pr-14">
             <p className="truncate text-sm font-medium text-zinc-900">{previewImage?.title ?? 'Imagen'}</p>
+            {previewImage?.detailLine ? (
+              <p className="mt-1 truncate text-xs leading-snug text-zinc-500">{previewImage.detailLine}</p>
+            ) : null}
           </div>
-          <div className="max-h-[80vh] overflow-auto bg-black/5 p-4">
+          <div className="max-h-[80vh] overflow-auto bg-white">
             {previewImage?.url ? (
               // eslint-disable-next-line @next/next/no-img-element
-              <img src={previewImage.url} alt={previewImage.title} className="mx-auto h-auto max-h-[72vh] w-auto max-w-full" />
+              <img
+                src={previewImage.url}
+                alt={previewImage.title}
+                className="mx-auto block h-auto max-h-[72vh] w-auto max-w-full"
+              />
             ) : null}
           </div>
         </DialogContent>

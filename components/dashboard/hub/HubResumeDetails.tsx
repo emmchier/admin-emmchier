@@ -90,23 +90,26 @@ function Header(props: { title: string; entry: any; onBack: () => void; actions:
   return (
     <div className="shrink-0 space-y-3 px-4 pt-0">
       <div className="flex flex-wrap items-center justify-between gap-3">
-        <div className="flex min-w-0 items-center gap-2">
+        <div className="flex min-w-0 items-center gap-4">
           <TooltipProvider>
             <Tooltip>
               <TooltipTrigger asChild>
-                <Button type="button" variant="ghost" size="icon" onClick={props.onBack} aria-label="Go back">
+                <Button
+                  type="button"
+                  variant="outline"
+                  size="icon"
+                  className="h-9 w-9 shrink-0"
+                  onClick={props.onBack}
+                  aria-label="Go back"
+                >
                   <ArrowLeft className="h-4 w-4" />
                 </Button>
               </TooltipTrigger>
               <TooltipContent>Go back</TooltipContent>
             </Tooltip>
           </TooltipProvider>
-          <div className="min-w-0">
-            <h2 className="truncate text-base font-semibold text-neutral-900">{props.title}</h2>
-            <div className="mt-1">
-              <StatusBadge entry={props.entry} />
-            </div>
-          </div>
+          <StatusBadge entry={props.entry} />
+          <h2 className="truncate text-base font-semibold text-neutral-900">{props.title}</h2>
         </div>
         <div className="flex items-center gap-2">{props.actions}</div>
       </div>
@@ -166,8 +169,7 @@ export function HubTechDetail(props: { entryId: string; entryLocale: string; act
   };
 
   return (
-    <div className="grid h-full min-h-0 flex-1 grid-cols-12 bg-white">
-      <div className="col-span-12 flex min-h-0 flex-1 flex-col lg:col-start-3 lg:col-span-8">
+    <div className="flex h-full min-h-0 w-full min-w-0 flex-1 flex-col bg-white">
       <Header
         title={nameEn || 'Tech'}
         entry={entry}
@@ -209,7 +211,6 @@ export function HubTechDetail(props: { entryId: string; entryLocale: string; act
         busy={busy}
         onConfirm={remove}
       />
-      </div>
     </div>
   );
 }
@@ -268,8 +269,7 @@ export function HubCourseDetail(props: { entryId: string; entryLocale: string; a
   };
 
   return (
-    <div className="grid h-full min-h-0 flex-1 grid-cols-12 bg-white">
-      <div className="col-span-12 flex min-h-0 flex-1 flex-col lg:col-start-3 lg:col-span-8">
+    <div className="flex h-full min-h-0 w-full min-w-0 flex-1 flex-col bg-white">
       <Header
         title={draft.titleEn || 'Course'}
         entry={entry}
@@ -319,7 +319,6 @@ export function HubCourseDetail(props: { entryId: string; entryLocale: string; a
         busy={busy}
         onConfirm={remove}
       />
-      </div>
     </div>
   );
 }
@@ -377,8 +376,7 @@ export function HubStudyDetail(props: { entryId: string; entryLocale: string; ac
   };
 
   return (
-    <div className="grid h-full min-h-0 flex-1 grid-cols-12 bg-white">
-      <div className="col-span-12 flex min-h-0 flex-1 flex-col lg:col-start-3 lg:col-span-8">
+    <div className="flex h-full min-h-0 w-full min-w-0 flex-1 flex-col bg-white">
       <Header
         title={draft.titleEn || 'Study'}
         entry={entry}
@@ -428,7 +426,6 @@ export function HubStudyDetail(props: { entryId: string; entryLocale: string; ac
         busy={busy}
         onConfirm={remove}
       />
-      </div>
     </div>
   );
 }
@@ -484,8 +481,7 @@ export function HubLanguageDetail(props: { entryId: string; entryLocale: string;
   };
 
   return (
-    <div className="grid h-full min-h-0 flex-1 grid-cols-12 bg-white">
-      <div className="col-span-12 flex min-h-0 flex-1 flex-col lg:col-start-3 lg:col-span-8">
+    <div className="flex h-full min-h-0 w-full min-w-0 flex-1 flex-col bg-white">
       <Header
         title={draft.nameEn || 'Language'}
         entry={entry}
@@ -524,7 +520,6 @@ export function HubLanguageDetail(props: { entryId: string; entryLocale: string;
         busy={busy}
         onConfirm={remove}
       />
-      </div>
     </div>
   );
 }
@@ -606,8 +601,7 @@ export function HubExperienceDetail(props: { entryId: string; entryLocale: strin
   };
 
   return (
-    <div className="grid h-full min-h-0 flex-1 grid-cols-12 bg-white">
-      <div className="col-span-12 flex min-h-0 flex-1 flex-col lg:col-start-3 lg:col-span-8">
+    <div className="flex h-full min-h-0 w-full min-w-0 flex-1 flex-col bg-white">
       <Header
         title={draft.roleEn || 'Experience'}
         entry={entry}
@@ -673,7 +667,6 @@ export function HubExperienceDetail(props: { entryId: string; entryLocale: strin
         busy={busy}
         onConfirm={remove}
       />
-      </div>
     </div>
   );
 }

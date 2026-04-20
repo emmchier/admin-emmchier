@@ -12,14 +12,11 @@ type State = {
   originalData: Record<string, JsonValue> | null;
   currentData: Record<string, JsonValue> | null;
   isDirty: boolean;
-  slugManuallyEdited: boolean;
 };
 
 type Actions = {
   reset: (original: Record<string, JsonValue>) => void;
   setField: (id: string, value: JsonValue) => void;
-  markSlugManual: () => void;
-  applySlugFromTitleIfAllowed: () => void;
 };
 
 function stableStringify(value: unknown): string {
@@ -73,49 +70,21 @@ function computeDirty(
   return false;
 }
 
-function slugifyTitle(title: string): string {
-  return title
-    .toLowerCase()
-    .trim()
-    .replace(/\s+/g, '-')
-    .replace(/[^\w-]+/g, '');
-}
-
-export const useProjectEditorStore = create<State & Actions>((set, get) => ({
+export const useProjectEditorStore = create<State & Actions>((set) => ({
   originalData: null,
   currentData: null,
   isDirty: false,
-  slugManuallyEdited: false,
 
   reset: (original) =>
     set(() => ({
       originalData: original,
       currentData: original,
       isDirty: false,
-      slugManuallyEdited: false,
     })),
 
   setField: (id, value) =>
     set((state) => {
       const next = { ...(state.currentData ?? {}), [id]: value } as Record<string, JsonValue>;
-      const isDirty = computeDirty(state.originalData, next);
-      return { currentData: next, isDirty };
-    }),
-
-  markSlugManual: () => set(() => ({ slugManuallyEdited: true })),
-
-  applySlugFromTitleIfAllowed: () =>
-    set((state) => {
-      if (state.slugManuallyEdited) return state;
-      const current = state.currentData ?? {};
-      const title =
-        typeof current.title === 'string' && current.title.trim().length > 0
-          ? current.title
-          : typeof current.name === 'string'
-            ? current.name
-            : '';
-      const slug = slugifyTitle(title);
-      const next = { ...current, slug } as Record<string, JsonValue>;
       const isDirty = computeDirty(state.originalData, next);
       return { currentData: next, isDirty };
     }),

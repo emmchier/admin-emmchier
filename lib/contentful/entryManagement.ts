@@ -2,6 +2,7 @@ import 'server-only';
 
 import type { PlainClientAPI } from 'contentful-management';
 import type { ContentfulClients } from '@/lib/contentful/clients';
+import { isEntryPublished } from '@/lib/contentful/isEntryPublished';
 import { logCMAOperation } from '@/lib/contentful/logCmaOperation';
 
 export type JsonPrimitive = string | number | boolean | null;
@@ -117,11 +118,31 @@ export async function managementUpdateEntry(
 
 export async function managementDeleteEntry(clients: ContentfulClients, entryId: string) {
   const { managementClient: client, spaceId, environmentId } = clients;
+  let contentTypeId: string | null = null;
   try {
+    const entry = await client.entry.get({ spaceId, environmentId, entryId });
+    contentTypeId = entry?.sys?.contentType?.sys?.id ? String(entry.sys.contentType.sys.id) : null;
+
+    /** CMA rejects delete on published entries ("Cannot delete published"). */
+    if (isEntryPublished(entry.sys)) {
+      await client.entry.unpublish({ spaceId, environmentId, entryId }, entry);
+      logCMAOperation({
+        action: 'UNPUBLISH',
+        contentType: contentTypeId,
+        entryId,
+        response: { ok: true, reason: 'before_delete' },
+      });
+    }
+
     await client.entry.delete({ spaceId, environmentId, entryId });
-    logCMAOperation({ action: 'DELETE', entryId, response: { ok: true } });
+    logCMAOperation({
+      action: 'DELETE',
+      contentType: contentTypeId,
+      entryId,
+      response: { ok: true },
+    });
   } catch (error) {
-    logCMAOperation({ action: 'DELETE', entryId, error });
+    logCMAOperation({ action: 'DELETE', contentType: contentTypeId, entryId, error });
     throw error;
   }
 }

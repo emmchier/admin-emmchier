@@ -1,4 +1,5 @@
 import type { EntryLink } from '@/components/cms/EntryReferenceMultiSelect';
+import { pickCanonicalResumeEntry } from '@/lib/hub/resumeLinkField';
 import { contentfulService } from '@/services/contentfulService';
 
 export const HUB_MANAGEMENT_API = '/api/contentful/hub';
@@ -27,8 +28,8 @@ export function mergeLink(existingCell: any, newId: string): { nextLinks: EntryL
 
 export async function fetchFirstResumeId(): Promise<string | null> {
   const items = await contentfulService.getEntriesCached({ space: 'hub', contentTypeId: 'resume' });
-  const first = items?.[0] as any;
-  return typeof first?.sys?.id === 'string' ? String(first.sys.id) : null;
+  const canonical = pickCanonicalResumeEntry((items ?? []) as any[]);
+  return canonical?.sys?.id ? String(canonical.sys.id) : null;
 }
 
 export async function fetchEntry(entryId: string): Promise<any> {

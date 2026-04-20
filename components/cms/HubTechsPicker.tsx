@@ -7,7 +7,15 @@ import { Badge } from '@/components/ui/badge';
 import { Input } from '@/components/ui/input';
 import { ScrollArea } from '@/components/ui/scroll-area';
 import { DropdownMenu, DropdownMenuContent, DropdownMenuTrigger } from '@/components/ui/dropdown-menu';
-import { Sheet, SheetContent, SheetDescription, SheetHeader, SheetTitle } from '@/components/ui/sheet';
+import {
+  Sheet,
+  SheetContent,
+  SheetDescription,
+  SheetFooter,
+  SheetHeader,
+  SheetScrollBody,
+  SheetTitle,
+} from '@/components/ui/sheet';
 import { Label } from '@/components/ui/label';
 import { buttonVariants } from '@/components/ui/button';
 import type { EntryLink } from '@/components/cms/EntryReferenceMultiSelect';
@@ -193,11 +201,11 @@ export function HubTechsPicker(props: {
         }}
       >
         <SheetContent side="right" className="w-full sm:max-w-lg">
-          <SheetHeader className="border-b border-neutral-200">
+          <SheetHeader>
             <SheetTitle>Crear Tech</SheetTitle>
             <SheetDescription>Creación inline para continuar el flujo de Experience.</SheetDescription>
           </SheetHeader>
-          <div className="grid gap-4 p-4">
+          <SheetScrollBody className="space-y-4 pt-2">
             <div className="grid gap-2">
               <Label htmlFor="hub-tech-name-en">Name EN</Label>
               <Input id="hub-tech-name-en" value={newNameEn} onChange={(e) => setNewNameEn(e.target.value)} />
@@ -207,41 +215,44 @@ export function HubTechsPicker(props: {
               <Input id="hub-tech-name-es" value={newNameEs} onChange={(e) => setNewNameEs(e.target.value)} />
             </div>
             {loadError ? <p className="text-xs text-red-600">{loadError}</p> : null}
-            <div className="flex justify-end">
-              <Button
-                type="button"
-                disabled={creating || !newNameEn.trim() || !newNameEs.trim()}
-                onClick={async () => {
-                  if (creating) return;
-                  const nameEn = newNameEn.trim();
-                  const nameEs = newNameEs.trim();
-                  if (!nameEn || !nameEs) return;
-                  setCreating(true);
-                  setLoadError(null);
-                  try {
-                    const space = contentfulService.inferSpaceFromManagementApiRoot(managementApiRoot);
-                    const created = await contentfulService.createEntry({ space, contentTypeId: 'tech', fields: { nameEn, nameEs } });
-                    const id = String(created?.sys?.id ?? '');
-                    if (!id) throw new Error('Missing tech id');
+          </SheetScrollBody>
+          <SheetFooter className="flex-row flex-wrap justify-end gap-2">
+            <Button type="button" variant="outline" onClick={() => setCreateOpen(false)} disabled={creating}>
+              Cancelar
+            </Button>
+            <Button
+              type="button"
+              disabled={creating || !newNameEn.trim() || !newNameEs.trim()}
+              onClick={async () => {
+                if (creating) return;
+                const nameEn = newNameEn.trim();
+                const nameEs = newNameEs.trim();
+                if (!nameEn || !nameEs) return;
+                setCreating(true);
+                setLoadError(null);
+                try {
+                  const space = contentfulService.inferSpaceFromManagementApiRoot(managementApiRoot);
+                  const created = await contentfulService.createEntry({ space, contentTypeId: 'tech', fields: { nameEn, nameEs } });
+                  const id = String(created?.sys?.id ?? '');
+                  if (!id) throw new Error('Missing tech id');
 
-                    await contentfulService.publishEntry({ space, entryId: id });
+                  await contentfulService.publishEntry({ space, entryId: id });
 
-                    await upsertHubEntryFromManagementApi('tech', id);
+                  await upsertHubEntryFromManagementApi('tech', id);
 
-                    safeOnChange([...normalizedValue, toLink(id)]);
-                    setCreateOpen(false);
-                  } catch (e) {
-                    setLoadError(e instanceof Error ? e.message : 'Error');
-                  } finally {
-                    setCreating(false);
-                  }
-                }}
-              >
-                {creating ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <Plus className="mr-2 h-4 w-4" />}
-                Guardar
-              </Button>
-            </div>
-          </div>
+                  safeOnChange([...normalizedValue, toLink(id)]);
+                  setCreateOpen(false);
+                } catch (e) {
+                  setLoadError(e instanceof Error ? e.message : 'Error');
+                } finally {
+                  setCreating(false);
+                }
+              }}
+            >
+              {creating ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <Plus className="mr-2 h-4 w-4" />}
+              Guardar
+            </Button>
+          </SheetFooter>
         </SheetContent>
       </Sheet>
     </div>
